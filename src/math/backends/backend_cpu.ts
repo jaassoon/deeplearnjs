@@ -23,11 +23,13 @@ import * as broadcast_util from '../broadcast_util';
 import * as concat_util from '../concat_util';
 import {Conv2DInfo} from '../conv_util';
 import {NDArrayMath} from '../math';
-// tslint:disable-next-line:max-line-length
-import {Array1D, Array2D, Array3D, Array4D, NDArray, Scalar} from '../ndarray';
 import * as ops from '../ops';
+import {tensor2d, tensor3d, tensor4d} from '../ops';
+import * as selu_util from '../selu_util';
+import {Tensor, Tensor1D, Tensor2D, Tensor3D, Tensor4D} from '../tensor';
 import * as types from '../types';
 import {DataType, DataTypeMap, Rank, TypedArray} from '../types';
+
 import * as axis_util from './../axis_util';
 import {MathBackend} from './backend';
 import {MatrixOrientation} from './types/matmul';
@@ -52,14 +54,12 @@ export class MathBackendCPU implements MathBackend {
     this.throwIfNoData(dataId);
     this.data[dataId] = values;
   }
-  writePixels(
-      dataId: number,
+  fromPixels(
       pixels: ImageData|HTMLImageElement|HTMLCanvasElement|HTMLVideoElement,
-      numChannels: number): void {
+      numChannels: number): Tensor3D {
     if (pixels == null) {
       throw new Error('MathBackendCPU.writePixels(): pixels can not be null');
     }
-    this.throwIfNoData(dataId);
     let vals: Uint8ClampedArray;
     if (pixels instanceof ImageData) {
       vals = pixels.data;
@@ -98,7 +98,9 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    this.data[dataId] = values;
+    const outShape: [number, number, number] =
+        [pixels.height, pixels.width, numChannels];
+    return tensor3d(values, outShape, 'int32');
   }
   async read(dataId: number): Promise<TypedArray> {
     this.throwIfNoData(dataId);
@@ -108,67 +110,65 @@ export class MathBackendCPU implements MathBackend {
     this.throwIfNoData(dataId);
     return this.data[dataId];
   }
+
   disposeData(dataId: number): void {
     delete this.data[dataId];
   }
-  async time(query: () => NDArray): Promise<number> {
+
+  async time(f: () => void): Promise<number> {
     const start = performance.now();
-    query();
+    f();
     return performance.now() - start;
   }
+
   private throwIfNoData(dataId: number) {
     if (!(dataId in this.data)) {
       throw new Error(
-          `No data found for NDArray with data id ${dataId}. ` +
-          `Use dl.ENV.math instead of constructing your own NDArrayMath. ` +
-          `If you need to construct your own math, make sure this array is ` +
-          `allocated after the math construction`);
+          `CPU backend: No data found for Tensor with data id ${dataId}. ` +
+          `Did you change your backend in the middle of the program? ` +
+          `New backends can't use Tensors created with previous backends`);
     }
   }
 
-  clone<T extends NDArray>(x: T): T {
-    return NDArray.make(x.shape, {values: new Float32Array(x.dataSync())}) as T;
-  }
-
-  slice1D(x: Array1D, begin: number, size: number): Array1D {
+  slice1D(x: Tensor1D, begin: number, size: number): Tensor1D {
     const newVals = x.dataSync().slice(begin, begin + size);
-    return Array1D.new(newVals, x.dtype);
+    return ops.tensor1d(newVals, x.dtype);
   }
 
-  slice2D(x: Array2D, begin: [number, number], size: [number, number]):
-      Array2D {
-    const result = ops.zeros<Rank.R2>(size, x.dtype);
+  slice2D(x: Tensor2D, begin: [number, number], size: [number, number]):
+      Tensor2D {
+    const buffer = ops.buffer<Rank.R2>(size, x.dtype);
     const [startI, startJ] = begin;
 
     for (let i = 0; i < size[0]; ++i) {
       for (let j = 0; j < size[1]; ++j) {
         const val = x.get(i + startI, j + startJ);
-        result.set(val, i, j);
+        buffer.set(val, i, j);
       }
     }
-    return result;
+    return buffer.toTensor();
   }
 
-  slice3D(x: Array3D, begin: [number, number, number], size: [
+  slice3D(x: Tensor3D, begin: [number, number, number], size: [
     number, number, number
-  ]): Array3D {
-    const result = ops.zeros<Rank.R3>(size, x.dtype);
+  ]): Tensor3D {
+    const buffer = ops.buffer<Rank.R3>(size, x.dtype);
     const [startI, startJ, startK] = begin;
 
     for (let i = 0; i < size[0]; ++i) {
       for (let j = 0; j < size[1]; ++j) {
         for (let k = 0; k < size[2]; ++k) {
           const val = x.get(i + startI, j + startJ, k + startK);
-          result.set(val, i, j, k);
+          buffer.set(val, i, j, k);
         }
       }
     }
-    return result;
+    return buffer.toTensor();
   }
-  slice4D(x: Array4D, begin: [number, number, number, number], size: [
+  slice4D(x: Tensor4D, begin: [number, number, number, number], size: [
     number, number, number, number
-  ]): Array4D {
-    const result = ops.zeros<Rank.R4>(size, x.dtype);
+  ]): Tensor4D {
+    const buffer = ops.buffer<Rank.R4>(size, x.dtype);
     const [startI, startJ, startK, startL] = begin;
 
     for (let i = 0; i < size[0]; ++i) {
@@ -176,16 +176,16 @@ export class MathBackendCPU implements MathBackend {
         for (let k = 0; k < size[2]; ++k) {
           for (let l = 0; l < size[3]; ++l) {
             const val = x.get(i + startI, j + startJ, k + startK, l + startL);
-            result.set(val, i, j, k, l);
+            buffer.set(val, i, j, k, l);
           }
         }
       }
     }
-    return result;
+    return buffer.toTensor();
   }
 
-  reverse4D(x: Array4D, axis: number[]): Array4D {
-    const result = ops.clone(x);
+  reverse4D(x: Tensor4D, axis: number[]): Tensor4D {
+    const buffer = ops.buffer<Rank.R4>(x.shape, x.dtype);
 
     // Reverse axis only if the axis has dim != 1
     const revAxis = (i: number) => axis.indexOf(i) !== -1 && x.shape[i] !== 1;
@@ -200,162 +200,67 @@ export class MathBackendCPU implements MathBackend {
             const c0 = revAxis(2) ? x.shape[2] - c - 1 : c;
             const d0 = revAxis(3) ? x.shape[3] - d - 1 : d;
             const val = x.get(b0, r0, c0, d0);
-            result.set(val, b, r, c, d);
+            buffer.set(val, b, r, c, d);
           }
         }
       }
     }
 
-    return result;
+    return buffer.toTensor();
   }
 
-  concat1D(a: Array1D, b: Array1D): Array1D {
-    const outShape = concat_util.computeOutShape(a.shape, b.shape, 0);
-    const result = ops.zeros<Rank.R1>(outShape as [number]);
+  // Concats 2d tensors along axis=1. See comments in MathBackend.concat().
+  concat(a: Tensor2D, b: Tensor2D): Tensor2D {
+    const outShape = concat_util.computeOutShape(
+                         a.shape, b.shape, 1 /* axis */) as [number, number];
+    const buffer = ops.buffer<Rank.R2>(outShape, a.dtype);
 
-    // Use built-in TypedArray.set() method for speed.
-    const aVals = a.dataSync();
-    const bVals = b.dataSync();
-    const vals = result.dataSync();
-    vals.set(aVals, 0);
-    vals.set(bVals, a.size);
-
-    return result;
-  }
-
-  concat2D(a: Array2D, b: Array2D, axis: number): Array2D {
-    const outShape = concat_util.computeOutShape(a.shape, b.shape, axis);
-    const result = ops.zeros<Rank.R2>(outShape as [number, number]);
-
-    if (axis === 0) {
+    if (a.shape[0] === 1 && b.shape[0] === 1) {
       // Use built-in TypedArray.set() method for speed.
       const aVals = a.dataSync();
       const bVals = b.dataSync();
-      const vals = result.dataSync();
+      const vals = buffer.values;
       vals.set(aVals, 0);
       vals.set(bVals, a.size);
-      return result;
+      return buffer.toTensor();
     }
 
     for (let i = 0; i < outShape[0]; ++i) {
-      for (let j = 0; j < outShape[1]; ++j) {
-        const index: [number, number] = [i, j];
-        let value: number;
-        if (index[axis] < a.shape[axis]) {
-          value = a.get(i, j);
-        } else {
-          index[axis] -= a.shape[axis];
-          const [i2, j2] = index;
-          value = b.get(i2, j2);
-        }
-
-        result.set(value, i, j);
+      for (let j = 0; j < a.shape[1]; ++j) {
+        buffer.set(a.get(i, j), i, j);
+      }
+      for (let j = 0; j < b.shape[1]; ++j) {
+        buffer.set(b.get(i, j), i, j + a.shape[1]);
       }
     }
-    return result;
+    return buffer.toTensor();
   }
 
-  concat3D(a: Array3D, b: Array3D, axis: number): Array3D {
-    const outShape = concat_util.computeOutShape(a.shape, b.shape, axis);
-
-    const result = ops.zeros<Rank.R3>(outShape as [number, number, number]);
-
-    if (axis === 0) {
-      // Use built-in TypedArray.set() method for speed.
-      const aVals = a.dataSync();
-      const bVals = b.dataSync();
-      const vals = result.dataSync();
-      vals.set(aVals, 0);
-      vals.set(bVals, a.size);
-      return result;
-    }
-
-    for (let i = 0; i < outShape[0]; ++i) {
-      for (let j = 0; j < outShape[1]; ++j) {
-        for (let k = 0; k < outShape[2]; ++k) {
-          // Shader begins.
-          const index: [number, number, number] = [i, j, k];
-          let value: number;
-          if (index[axis] < a.shape[axis]) {
-            value = a.get(i, j, k);
-          } else {
-            index[axis] -= a.shape[axis];
-            const [i2, j2, k2] = index;
-            value = b.get(i2, j2, k2);
-          }
-
-          result.set(value, i, j, k);
-        }
-      }
-    }
-
-    return result;
+  neg<T extends Tensor>(x: T): T {
+    return this.multiply(ops.scalar(-1), x) as T;
   }
 
-  concat4D(a: Array4D, b: Array4D, axis: number): Array4D {
-    const outShape = concat_util.computeOutShape(a.shape, b.shape, axis);
-    const result =
-        ops.zeros<Rank.R4>(outShape as [number, number, number, number]);
-
-    if (axis === 0) {
-      // Use built-in TypedArray.set() method for speed.
-      const aVals = a.dataSync();
-      const bVals = b.dataSync();
-      const vals = result.dataSync();
-      vals.set(aVals, 0);
-      vals.set(bVals, a.size);
-      return result;
-    }
-
-    for (let i = 0; i < outShape[0]; ++i) {
-      for (let j = 0; j < outShape[1]; ++j) {
-        for (let k = 0; k < outShape[2]; ++k) {
-          for (let l = 0; l < outShape[3]; ++l) {
-            // Shader begins.
-            const index: [number, number, number, number] = [i, j, k, l];
-            let value: number;
-            if (index[axis] < a.shape[axis]) {
-              value = a.get(i, j, k, l);
-            } else {
-              index[axis] -= a.shape[axis];
-              const [i2, j2, k2, l2] = index;
-              value = b.get(i2, j2, k2, l2);
-            }
-
-            result.set(value, i, j, k, l);
-          }
-        }
-      }
-    }
-
-    return result;
-  }
-
-  neg<T extends NDArray>(x: T): T {
-    return this.multiply(Scalar.new(-1), x) as T;
-  }
-
-  add(a: NDArray, b: NDArray): NDArray {
+  add(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(
                a, b, types.upcastType(a.dtype, b.dtype),
-               (aValue, bValue) => aValue + bValue) as NDArray;
+               (aValue, bValue) => aValue + bValue) as Tensor;
   }
 
-  subtract(a: NDArray, b: NDArray): NDArray {
+  subtract(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(
                a, b, types.upcastType(a.dtype, b.dtype),
-               (aValue, bValue) => aValue - bValue) as NDArray;
+               (aValue, bValue) => aValue - bValue) as Tensor;
   }
 
-  pow<T extends NDArray>(a: T, b: NDArray): T {
+  pow<T extends Tensor>(a: T, b: Tensor): T {
     return this.broadcastedBinaryOp(
                a, b, a.dtype, (aValue, bValue) => Math.pow(aValue, bValue)) as
         T;
   }
 
   matMul(
-      a: Array2D, b: Array2D, aOrientation = MatrixOrientation.REGULAR,
-      bOrientation = MatrixOrientation.REGULAR): Array2D {
+      a: Tensor2D, b: Tensor2D, aOrientation = MatrixOrientation.REGULAR,
+      bOrientation = MatrixOrientation.REGULAR): Tensor2D {
     const sharedDim =
         (aOrientation === MatrixOrientation.REGULAR) ? a.shape[1] : a.shape[0];
 
@@ -364,9 +269,9 @@ export class MathBackendCPU implements MathBackend {
     const rightDim =
         (bOrientation === MatrixOrientation.REGULAR) ? b.shape[1] : b.shape[0];
 
-    const normalGetter = (matrix: Array2D, i: number, j: number) =>
+    const normalGetter = (matrix: Tensor2D, i: number, j: number) =>
         matrix.get(i, j);
-    const transposedGetter = (matrix: Array2D, i: number, j: number) =>
+    const transposedGetter = (matrix: Tensor2D, i: number, j: number) =>
         matrix.get(j, i);
 
     const aGetter = (aOrientation === MatrixOrientation.REGULAR) ?
@@ -387,21 +292,21 @@ export class MathBackendCPU implements MathBackend {
         values[index++] = sum;
       }
     }
-    return Array2D.new([leftDim, rightDim], values);
+    return ops.tensor2d(values, [leftDim, rightDim]);
   }
 
-  multiply(a: NDArray, b: NDArray): NDArray {
+  multiply(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(
                a, b, types.upcastType(a.dtype, b.dtype),
-               (aValue, bValue) => aValue * bValue) as NDArray;
+               (aValue, bValue) => aValue * bValue) as Tensor;
   }
 
-  divide(a: NDArray, b: NDArray): NDArray {
+  divide(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(
-               a, b, 'float32', (aValue, bValue) => aValue / bValue) as NDArray;
+               a, b, 'float32', (aValue, bValue) => aValue / bValue) as Tensor;
   }
 
-  sum(x: NDArray, axes: number[]): NDArray {
+  sum(x: Tensor, axes: number[]): Tensor {
     axis_util.assertAxesAreInnerMostDims('sum', axes, x.rank);
     const [outShape, reduceShape] =
         axis_util.computeOutAndReduceShapes(x.shape, axes);
@@ -422,7 +327,7 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  argMin(x: NDArray, axes: number[]): NDArray {
+  argMin(x: Tensor, axes: number[]): Tensor {
     axis_util.assertAxesAreInnerMostDims('argMin', axes, x.rank);
     const [outShape, reduceShape] =
         axis_util.computeOutAndReduceShapes(x.shape, axes);
@@ -451,7 +356,7 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  argMax(x: NDArray, axes: number[]): NDArray {
+  argMax(x: Tensor, axes: number[]): Tensor {
     axis_util.assertAxesAreInnerMostDims('argMax', axes, x.rank);
     const [outShape, reduceShape] =
         axis_util.computeOutAndReduceShapes(x.shape, axes);
@@ -480,7 +385,7 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  equal(a: NDArray, b: NDArray): NDArray {
+  equal(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -490,7 +395,7 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  notEqual(a: NDArray, b: NDArray): NDArray {
+  notEqual(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -500,7 +405,7 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  less(a: NDArray, b: NDArray): NDArray {
+  less(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -510,7 +415,7 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  lessEqual(a: NDArray, b: NDArray): NDArray {
+  lessEqual(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -520,7 +425,7 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  greater(a: NDArray, b: NDArray): NDArray {
+  greater(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -530,7 +435,7 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  greaterEqual(a: NDArray, b: NDArray): NDArray {
+  greaterEqual(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -540,7 +445,20 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  logicalAnd(a: NDArray, b: NDArray): NDArray {
+  logicalNot<T extends Tensor>(x: T): T {
+    const values = x.dataSync();
+    const newValues = new Int32Array(values.length);
+    for (let i = 0; i < values.length; ++i) {
+      if (util.isValNaN(values[i], x.dtype)) {
+        newValues[i] = util.getNaN('bool');
+      } else {
+        newValues[i] = values[i] ? 0 : 1;
+      }
+    }
+    return Tensor.make(x.shape, {values: newValues}, 'bool') as T;
+  }
+
+  logicalAnd(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -550,7 +468,7 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  logicalOr(a: NDArray, b: NDArray): NDArray {
+  logicalOr(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
       if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
         return util.getNaN('bool');
@@ -560,14 +478,27 @@ export class MathBackendCPU implements MathBackend {
     });
   }
 
-  where(condition: NDArray, a: NDArray, b: NDArray, dtype: DataType): NDArray {
+  logicalXor(a: Tensor, b: Tensor): Tensor {
+    return this.broadcastedBinaryOp(a, b, 'bool', (aVal, bVal) => {
+      if (util.isValNaN(aVal, a.dtype) || util.isValNaN(bVal, b.dtype)) {
+        return util.getNaN('bool');
+      } else {
+        return aVal ^ bVal;
+      }
+    });
+  }
+
+  where(condition: Tensor, a: Tensor, b: Tensor, dtype: DataType): Tensor {
     const values = condition.dataSync();
     const aValues = a.dataSync();
     const bValues = b.dataSync();
     const result = ops.zeros(a.shape, dtype);
     const newValues = result.dataSync();
     let index = 0;
-    const offset = condition.rank > 1 || a.rank === 1 ? 1 : a.shape[1];
+    const offset = condition.rank === 0 || condition.rank > 1 || a.rank === 1 ?
+        1 :
+        a.shape[1];
+
     for (let i = 0; i < values.length; i++) {
       for (let j = 0; j < offset; j++) {
         if (values[i] === 1) {
@@ -580,16 +511,16 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  topKValues<T extends NDArray>(x: T, k: number): Array1D {
-    return this.topK(x, k).values as Array1D;
+  topKValues<T extends Tensor>(x: T, k: number): Tensor1D {
+    return this.topK(x, k).values as Tensor1D;
   }
 
-  topKIndices(x: NDArray, k: number): Array1D {
+  topKIndices(x: Tensor, k: number): Tensor1D {
     return this.topK(x, k).indices;
   }
 
-  private topK<T extends NDArray>(x: T, k: number):
-      {values: Array1D, indices: Array1D} {
+  private topK<T extends Tensor>(x: T, k: number):
+      {values: Tensor1D, indices: Tensor1D} {
     const values = x.dataSync();
     const valuesAndIndices: Array<{value: number, index: number}> = [];
     for (let i = 0; i < values.length; i++) {
@@ -606,12 +537,12 @@ export class MathBackendCPU implements MathBackend {
       topkIndices[i] = valuesAndIndices[i].index;
     }
     return {
-      values: Array1D.new(topkValues, x.dtype),
-      indices: Array1D.new<'int32'>(topkIndices)
+      values: ops.tensor1d(topkValues, x.dtype),
+      indices: Tensor1D.new<'int32'>(topkIndices)
     };
   }
 
-  min(x: NDArray, axes: number[]): NDArray {
+  min(x: Tensor, axes: number[]): Tensor {
     axis_util.assertAxesAreInnerMostDims('min', axes, x.rank);
     const [outShape, reduceShape] =
         axis_util.computeOutAndReduceShapes(x.shape, axes);
@@ -638,12 +569,12 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  minimum(a: NDArray, b: NDArray): NDArray {
+  minimum(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(
         a, b, a.dtype, (aVal, bVal) => Math.min(aVal, bVal));
   }
 
-  max(x: NDArray, axes: number[]): NDArray {
+  max(x: Tensor, axes: number[]): Tensor {
     axis_util.assertAxesAreInnerMostDims('max', axes, x.rank);
     const [outShape, reduceShape] =
         axis_util.computeOutAndReduceShapes(x.shape, axes);
@@ -670,69 +601,69 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  maximum(a: NDArray, b: NDArray): NDArray {
+  maximum(a: Tensor, b: Tensor): Tensor {
     return this.broadcastedBinaryOp(
         a, b, a.dtype, (aVal, bVal) => Math.max(aVal, bVal));
   }
 
-  ceil<T extends NDArray>(x: T): T {
+  ceil<T extends Tensor>(x: T): T {
     const values = x.dataSync();
     const newValues = new Float32Array(values.length);
     for (let i = 0; i < values.length; ++i) {
       newValues[i] = Math.ceil(values[i]);
     }
-    return NDArray.make(x.shape, {values: newValues}) as T;
+    return Tensor.make(x.shape, {values: newValues}) as T;
   }
 
-  floor<T extends NDArray>(x: T): T {
+  floor<T extends Tensor>(x: T): T {
     const values = x.dataSync();
     const newValues = new Float32Array(values.length);
     for (let i = 0; i < values.length; ++i) {
       newValues[i] = Math.floor(values[i]);
     }
-    return NDArray.make(x.shape, {values: newValues}) as T;
+    return Tensor.make(x.shape, {values: newValues}) as T;
   }
 
-  exp<T extends NDArray>(x: T): T {
+  exp<T extends Tensor>(x: T): T {
     const values = x.dataSync();
     const newValues = new Float32Array(values.length);
     for (let i = 0; i < values.length; ++i) {
       newValues[i] = Math.exp(values[i]);
     }
-    return NDArray.make(x.shape, {values: newValues}) as T;
+    return Tensor.make(x.shape, {values: newValues}) as T;
   }
 
-  log<T extends NDArray>(x: T): T {
+  log<T extends Tensor>(x: T): T {
     const values = x.dataSync();
     const newValues = new Float32Array(values.length);
     for (let i = 0; i < values.length; ++i) {
       const value = values[i];
       newValues[i] = Math.log(value);
     }
-    return NDArray.make(x.shape, {values: newValues}) as T;
+    return Tensor.make(x.shape, {values: newValues}) as T;
   }
 
-  sqrt<T extends NDArray>(x: T): T {
+  sqrt<T extends Tensor>(x: T): T {
     const values = x.dataSync();
     const newValues = new Float32Array(values.length);
     for (let i = 0; i < values.length; ++i) {
       const value = values[i];
       newValues[i] = Math.sqrt(value);
     }
-    return NDArray.make(x.shape, {values: newValues}) as T;
+    return Tensor.make(x.shape, {values: newValues}) as T;
   }
 
-  square<T extends NDArray>(x: T): T {
+  square<T extends Tensor>(x: T): T {
     const values = x.dataSync();
     const newValues = new Float32Array(values.length);
     for (let i = 0; i < values.length; ++i) {
       const value = values[i];
       newValues[i] = value * value;
     }
-    return NDArray.make(x.shape, {values: newValues}) as T;
+    return Tensor.make(x.shape, {values: newValues}) as T;
   }
 
-  relu<T extends NDArray>(x: T): T {
+  relu<T extends Tensor>(x: T): T {
     const res = ops.zeros(x.shape, x.dtype);
     const resVals = res.dataSync();
     const inVals = x.dataSync();
@@ -747,7 +678,7 @@ export class MathBackendCPU implements MathBackend {
     return res as T;
   }
 
-  elu<T extends NDArray>(x: T): T {
+  elu<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
@@ -758,10 +689,10 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = (Math.exp(v) - 1);
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  eluDer<T extends NDArray>(x: T): T {
+  eluDer<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
@@ -772,14 +703,14 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = Math.exp(v);
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  selu<T extends NDArray>(x: T): T {
+  selu<T extends Tensor>(x: T): T {
     // Stable and Attracting Fixed Point (0, 1) for Normalized Weights.
     // see: https://arxiv.org/abs/1706.02515
-    const scaleAlpha = 1.7580993408473768599402175208123;
-    const scale = 1.0507009873554804934193349852946;
+    const scaleAlpha = selu_util.SELU_SCALEALPHA;
+    const scale = selu_util.SELU_SCALE;
 
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
@@ -791,10 +722,10 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = scaleAlpha * (Math.exp(v) - 1);
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  leakyRelu<T extends NDArray>(x: T, alpha: number) {
+  leakyRelu<T extends Tensor>(x: T, alpha: number) {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; i++) {
@@ -805,10 +736,10 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = alpha * v;
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  prelu<T extends NDArray>(x: T, alpha: T) {
+  prelu<T extends Tensor>(x: T, alpha: T) {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     const alphas = alpha.dataSync();
@@ -820,10 +751,10 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = alphas[i] * v;
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  preluDer<T extends NDArray>(x: T, alpha: T) {
+  preluDer<T extends Tensor>(x: T, alpha: T) {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     const alphas = alpha.dataSync();
@@ -837,127 +768,127 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = v;
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  clip<T extends NDArray>(x: T, min: number, max: number): T {
+  clip<T extends Tensor>(x: T, min: number, max: number): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.min(max, Math.max(min, values[i]));
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  abs<T extends NDArray>(x: T): T {
+  abs<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.abs(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  int<R extends Rank>(x: NDArray<R>): NDArray<R> {
+  int<R extends Rank>(x: Tensor<R>): Tensor<R> {
     const resultValues = new Int32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = values[i];
     }
-    return NDArray.make(x.shape, {values: resultValues}, 'int32') as NDArray<R>;
+    return Tensor.make(x.shape, {values: resultValues}, 'int32') as Tensor<R>;
   }
 
-  sigmoid<T extends NDArray>(x: T): T {
+  sigmoid<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = 1 / (1 + Math.exp(-values[i]));
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  sin<T extends NDArray>(x: T): T {
+  sin<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.sin(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  cos<T extends NDArray>(x: T): T {
+  cos<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.cos(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  tan<T extends NDArray>(x: T): T {
+  tan<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.tan(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  asin<T extends NDArray>(x: T): T {
+  asin<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.asin(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  acos<T extends NDArray>(x: T): T {
+  acos<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.acos(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  atan<T extends NDArray>(x: T): T {
+  atan<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.atan(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  sinh<T extends NDArray>(x: T): T {
+  sinh<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.sinh(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  cosh<T extends NDArray>(x: T): T {
+  cosh<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = Math.cosh(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  tanh<T extends NDArray>(x: T): T {
+  tanh<T extends Tensor>(x: T): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
       resultValues[i] = util.tanh(values[i]);
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  step<T extends NDArray>(x: T, alpha = 0): T {
+  step<T extends Tensor>(x: T, alpha = 0): T {
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
     for (let i = 0; i < values.length; ++i) {
@@ -968,16 +899,17 @@ export class MathBackendCPU implements MathBackend {
         resultValues[i] = value > 0 ? 1 : alpha;
       }
     }
-    return NDArray.make(x.shape, {values: resultValues}) as T;
+    return Tensor.make(x.shape, {values: resultValues}) as T;
   }
 
-  conv2d(x: Array4D, filter: Array4D, bias: Array1D|null, convInfo: Conv2DInfo):
-      Array4D {
+  conv2d(
+      x: Tensor4D, filter: Tensor4D, bias: Tensor1D|null,
+      convInfo: Conv2DInfo): Tensor4D {
     const filterHeight = convInfo.filterHeight;
     const filterWidth = convInfo.filterWidth;
     const padLeft = convInfo.padInfo.left;
     const padTop = convInfo.padInfo.top;
-    const y = ops.zeros<Rank.R4>(convInfo.outShape);
+    const y = ops.buffer<Rank.R4>(convInfo.outShape, x.dtype);
 
     for (let b = 0; b < convInfo.batchSize; ++b) {
       for (let d2 = 0; d2 < convInfo.outChannels; ++d2) {
@@ -1007,17 +939,19 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return y;
+    return y.toTensor();
   }
 
-  conv2dDerInput(dy: Array4D, filter: Array4D, convInfo: Conv2DInfo): Array4D {
+  conv2dDerInput(dy: Tensor4D, filter: Tensor4D, convInfo: Conv2DInfo):
+      Tensor4D {
     const filterHeight = convInfo.filterHeight;
     const filterWidth = convInfo.filterWidth;
     const topPad = filterHeight - 1 - convInfo.padInfo.top;
     const leftPad = filterWidth - 1 - convInfo.padInfo.left;
     const strideHeight = convInfo.strideHeight;
     const strideWidth = convInfo.strideWidth;
-    const dx = ops.zeros<Rank.R4>(convInfo.inShape);
+    const dx = ops.buffer<Rank.R4>(convInfo.inShape, 'float32');
+
     for (let b = 0; b < convInfo.batchSize; ++b) {
       for (let d1 = 0; d1 < convInfo.inChannels; ++d1) {
         for (let xR = 0; xR < convInfo.inHeight; ++xR) {
@@ -1052,15 +986,15 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return dx;
+    return dx.toTensor();
   }
 
-  conv2dDerFilter(x: Array4D, dy: Array4D, convInfo: Conv2DInfo): Array4D {
+  conv2dDerFilter(x: Tensor4D, dy: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
     const strideHeight = convInfo.strideHeight;
     const strideWidth = convInfo.strideWidth;
     const filterHeight = convInfo.filterHeight;
     const filterWidth = convInfo.filterWidth;
-    const dW = ops.zeros<Rank.R4>(convInfo.filterShape);
+    const dW = ops.buffer<Rank.R4>(convInfo.filterShape, 'float32');
 
     const leftPad = convInfo.padInfo.left;
     const topPad = convInfo.padInfo.top;
@@ -1093,10 +1027,10 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return dW;
+    return dW.toTensor();
   }
 
-  conv2dDerBias(dy: Array4D): Array1D {
+  conv2dDerBias(dy: Tensor4D): Tensor1D {
     const [batchSize, numRows, numCols, outDepth] = dy.shape;
     const values = new Float32Array(outDepth);
     for (let d2 = 0; d2 < outDepth; ++d2) {
@@ -1110,16 +1044,17 @@ export class MathBackendCPU implements MathBackend {
       }
       values[d2] = sum;
     }
-    return Array1D.new(values);
+    return ops.tensor1d(values);
   }
 
-  depthwiseConv2D(x: Array4D, filter: Array4D, convInfo: Conv2DInfo): Array4D {
+  depthwiseConv2D(x: Tensor4D, filter: Tensor4D, convInfo: Conv2DInfo):
+      Tensor4D {
     const filterHeight = convInfo.filterHeight;
     const filterWidth = convInfo.filterWidth;
     const padLeft = convInfo.padInfo.left;
     const padTop = convInfo.padInfo.top;
     const chMul = convInfo.outChannels / convInfo.inChannels;
-    const y = ops.zeros<Rank.R4>(convInfo.outShape);
+    const y = ops.buffer<Rank.R4>(convInfo.outShape, x.dtype);
 
     for (let b = 0; b < convInfo.batchSize; ++b) {
       for (let d1 = 0; d1 < convInfo.inChannels; ++d1) {
@@ -1148,18 +1083,17 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return y;
+    return y.toTensor();
   }
 
-  tile<T extends NDArray>(x: T, reps: number[]): T {
+  tile<T extends Tensor>(x: T, reps: number[]): T {
     const newShape: number[] = new Array(x.rank);
     for (let i = 0; i < newShape.length; i++) {
       newShape[i] = x.shape[i] * reps[i];
     }
-    const result = ops.zeros(newShape, x.dtype);
-    const newValues = result.dataSync();
+    const result = ops.buffer(newShape, x.dtype);
     const values = x.dataSync();
-    for (let i = 0; i < result.size; ++i) {
+    for (let i = 0; i < result.values.length; ++i) {
       const newLoc = result.indexToLoc(i);
 
       const originalLoc: number[] = new Array(x.rank);
@@ -1169,13 +1103,13 @@ export class MathBackendCPU implements MathBackend {
 
       const originalIndex = x.locToIndex(originalLoc);
 
-      newValues[i] = values[originalIndex];
+      result.values[i] = values[originalIndex];
     }
-    return result as T;
+    return result.toTensor() as T;
   }
 
-  pad1D(x: Array1D, paddings: [number, number], constantValue: number):
-      Array1D {
+  pad1D(x: Tensor1D, paddings: [number, number], constantValue: number):
+      Tensor1D {
     const leftPadding = paddings[0];
     const rightPadding = paddings[1];
 
@@ -1196,8 +1130,8 @@ export class MathBackendCPU implements MathBackend {
   }
 
   pad2D(
-      x: Array2D, paddings: [[number, number], [number, number]],
-      constantValue: number): Array2D {
+      x: Tensor2D, paddings: [[number, number], [number, number]],
+      constantValue: number): Tensor2D {
     const topPadding = paddings[0][0];
     const bottomPadding = paddings[0][1];
     const leftPadding = paddings[1][0];
@@ -1235,14 +1169,14 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  transpose<T extends NDArray>(x: T, perm: number[]): T {
+  transpose<T extends Tensor>(x: T, perm: number[]): T {
     const newShape: number[] = new Array(x.rank);
     for (let i = 0; i < newShape.length; i++) {
       newShape[i] = x.shape[perm[i]];
     }
     const resultValues = new Float32Array(x.size);
     const values = x.dataSync();
-    const result = NDArray.make(newShape, {values: resultValues}) as T;
+    const result = Tensor.make(newShape, {values: resultValues}) as T;
     for (let i = 0; i < x.size; ++i) {
       const loc = x.indexToLoc(i);
 
@@ -1258,7 +1192,7 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  gather<T extends NDArray>(x: T, indices: Array1D, axis: number): T {
+  gather<T extends Tensor>(x: T, indices: Tensor1D, axis: number): T {
     const newShape: number[] = x.shape.slice();
     const indicesValues = indices.dataSync();
     newShape[axis] = indicesValues.length;
@@ -1277,12 +1211,13 @@ export class MathBackendCPU implements MathBackend {
     return result;
   }
 
-  private pool(x: Array4D, convInfo: Conv2DInfo, poolType: 'max'|'min'|'avg') {
+  private pool(x: Tensor4D, convInfo: Conv2DInfo, poolType: 'max'|'min'|'avg'):
+      Tensor4D {
     const strideHeight = convInfo.strideHeight;
     const strideWidth = convInfo.strideWidth;
     const filterHeight = convInfo.filterHeight;
     const filterWidth = convInfo.filterWidth;
-    const y = ops.zeros<Rank.R4>(convInfo.outShape);
+    const y = ops.buffer<Rank.R4>(convInfo.outShape, 'float32');
     const padTop = convInfo.padInfo.top;
     const padLeft = convInfo.padInfo.left;
     for (let b = 0; b < convInfo.batchSize; ++b) {
@@ -1324,15 +1259,15 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return y;
+    return y.toTensor();
   }
 
-  maxPool(x: Array4D, convInfo: Conv2DInfo): Array4D {
+  maxPool(x: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
     return this.pool(x, convInfo, 'max');
   }
 
-  maxPoolPositions(x: Array4D, convInfo: Conv2DInfo) {
-    const maxPositions = ops.zeros<Rank.R4>(convInfo.outShape);
+  private maxPoolPositions(x: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
+    const maxPositions = ops.buffer<Rank.R4>(convInfo.outShape, 'int32');
     const strideHeight = convInfo.strideHeight;
     const strideWidth = convInfo.strideWidth;
     const filterHeight = convInfo.filterHeight;
@@ -1368,10 +1303,10 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return maxPositions;
+    return maxPositions.toTensor();
   }
 
-  maxPoolBackprop(dy: Array4D, x: Array4D, convInfo: Conv2DInfo): Array4D {
+  maxPoolBackprop(dy: Tensor4D, x: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
     const maxPositions = this.maxPoolPositions(x, convInfo);
     const strideHeight = convInfo.strideHeight;
     const strideWidth = convInfo.strideWidth;
@@ -1379,7 +1314,7 @@ export class MathBackendCPU implements MathBackend {
     const filterWidth = convInfo.filterWidth;
     const padLeft = filterWidth - 1 - convInfo.padInfo.left;
     const padTop = filterHeight - 1 - convInfo.padInfo.top;
-    const dx = ops.zeros<Rank.R4>(x.shape);
+    const dx = ops.buffer<Rank.R4>(x.shape, 'float32');
 
     for (let b = 0; b < convInfo.batchSize; ++b) {
       for (let d = 0; d < convInfo.inChannels; ++d) {
@@ -1419,17 +1354,17 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return dx.asType(x.dtype);
+    return dx.toTensor();
   }
 
-  avgPoolBackprop(dy: Array4D, x: Array4D, convInfo: Conv2DInfo): Array4D {
+  avgPoolBackprop(dy: Tensor4D, x: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
     const strideHeight = convInfo.strideHeight;
     const strideWidth = convInfo.strideWidth;
     const filterHeight = convInfo.filterHeight;
     const filterWidth = convInfo.filterWidth;
     const padLeft = filterWidth - 1 - convInfo.padInfo.left;
     const padTop = filterHeight - 1 - convInfo.padInfo.top;
-    const dx = ops.zeros<Rank.R4>(x.shape);
+    const dx = ops.buffer<Rank.R4>(x.shape, 'float32');
 
     const avgMultiplier = 1 / (filterHeight * filterWidth);
 
@@ -1463,70 +1398,72 @@ export class MathBackendCPU implements MathBackend {
         }
       }
     }
-    return dx.asType(x.dtype);
+    return dx.toTensor();
   }
 
-  minPool(x: Array4D, convInfo: Conv2DInfo): Array4D {
+  minPool(x: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
     return this.pool(x, convInfo, 'min');
   }
 
-  avgPool(x: Array4D, convInfo: Conv2DInfo): Array4D {
-    return this.pool(x, convInfo, 'avg').asType('float32');
+  avgPool(x: Tensor4D, convInfo: Conv2DInfo): Tensor4D {
+    return this.pool(x, convInfo, 'avg').toFloat();
   }
 
-  resizeBilinear3D(
-      x: Array3D, newShape2D: [number, number],
-      alignCorners: boolean): Array3D {
+  resizeBilinear(
+      x: Tensor4D, newHeight: number, newWidth: number,
+      alignCorners: boolean): Tensor4D {
+    const [batch, oldHeight, oldWidth, numChannels] = x.shape;
     const output =
-        ops.zeros<Rank.R3>([newShape2D[0], newShape2D[1], x.shape[2]]);
+        ops.buffer<Rank.R4>([batch, newHeight, newWidth, numChannels], x.dtype);
 
-    const effectiveInputSize =
-        alignCorners ? [x.shape[0] - 1, x.shape[1] - 1, x.shape[2]] : x.shape;
-    const effectiveOutputSize = alignCorners ?
-        [output.shape[0] - 1, output.shape[1] - 1, output.shape[2]] :
-        output.shape;
-    for (let r = 0; r < output.shape[0]; r++) {
-      for (let c = 0; c < output.shape[1]; c++) {
-        for (let d = 0; d < output.shape[2]; d++) {
-          // Begin shader.
+    const effectiveInputSize: [number, number] =
+        alignCorners ? [oldHeight - 1, oldWidth - 1] : [oldHeight, oldWidth];
+    const effectiveOutputSize: [number, number] =
+        alignCorners ? [newHeight - 1, newWidth - 1] : [newHeight, newWidth];
+    for (let b = 0; b < batch; b++) {
+      for (let r = 0; r < newHeight; r++) {
+        for (let c = 0; c < newWidth; c++) {
+          for (let d = 0; d < numChannels; d++) {
+            // Begin shader.
 
-          // Compute the fractional index of the source.
-          const sourceFracRow =
-              (effectiveInputSize[0]) * r / (effectiveOutputSize[0]);
-          const sourceFracCol =
-              (effectiveInputSize[1]) * c / (effectiveOutputSize[1]);
+            // Compute the fractional index of the source.
+            const sourceFracRow =
+                (effectiveInputSize[0]) * r / (effectiveOutputSize[0]);
+            const sourceFracCol =
+                (effectiveInputSize[1]) * c / (effectiveOutputSize[1]);
 
-          const sourceRowFloor = Math.floor(sourceFracRow);
-          const sourceRowCeil =
-              Math.min(x.shape[0] - 1, Math.ceil(sourceFracRow));
-          const sourceColFloor = Math.floor(sourceFracCol);
-          const sourceColCeil =
-              Math.min(x.shape[1] - 1, Math.ceil(sourceFracCol));
+            const sourceRowFloor = Math.floor(sourceFracRow);
+            const sourceRowCeil =
+                Math.min(oldHeight - 1, Math.ceil(sourceFracRow));
+            const sourceColFloor = Math.floor(sourceFracCol);
+            const sourceColCeil =
+                Math.min(oldWidth - 1, Math.ceil(sourceFracCol));
 
-          const topLeft = x.get(sourceRowFloor, sourceColFloor, d);
-          const bottomLeft = x.get(sourceRowCeil, sourceColFloor, d);
-          const topRight = x.get(sourceRowFloor, sourceColCeil, d);
-          const bottomRight = x.get(sourceRowCeil, sourceColCeil, d);
+            const topLeft = x.get(b, sourceRowFloor, sourceColFloor, d);
+            const bottomLeft = x.get(b, sourceRowCeil, sourceColFloor, d);
+            const topRight = x.get(b, sourceRowFloor, sourceColCeil, d);
+            const bottomRight = x.get(b, sourceRowCeil, sourceColCeil, d);
 
-          const rowFrac = sourceFracRow - sourceRowFloor;
-          const colFrac = sourceFracCol - sourceColFloor;
+            const rowFrac = sourceFracRow - sourceRowFloor;
+            const colFrac = sourceFracCol - sourceColFloor;
 
-          const top = topLeft + (topRight - topLeft) * colFrac;
-          const bottom = bottomLeft + (bottomRight - bottomLeft) * colFrac;
-          const newValue = top + (bottom - top) * rowFrac;
+            const top = topLeft + (topRight - topLeft) * colFrac;
+            const bottom = bottomLeft + (bottomRight - bottomLeft) * colFrac;
+            const newValue = top + (bottom - top) * rowFrac;
 
-          output.set(newValue, r, c, d);
+            output.set(newValue, b, r, c, d);
+          }
         }
       }
     }
 
-    return output;
+    return output.toTensor();
   }
 
   batchNormalization2D(
-      x: Array2D, mean: Array2D|Array1D, variance: Array2D|Array1D,
-      varianceEpsilon: number, scale?: Array2D|Array1D,
-      offset?: Array2D|Array1D): Array2D {
+      x: Tensor2D, mean: Tensor2D|Tensor1D, variance: Tensor2D|Tensor1D,
+      varianceEpsilon: number, scale?: Tensor2D|Tensor1D,
+      offset?: Tensor2D|Tensor1D): Tensor2D {
     const xValues = x.dataSync();
     const meanValues = mean.dataSync();
     const varianceValues = variance.dataSync();
@@ -1541,13 +1478,13 @@ export class MathBackendCPU implements MathBackend {
               Math.sqrt(
                   varianceValues[i % varianceValues.length] + varianceEpsilon);
     }
-    return Array2D.new(x.shape, outValues);
+    return tensor2d(outValues, x.shape);
   }
 
   batchNormalization3D(
-      x: Array3D, mean: Array3D|Array1D, variance: Array3D|Array1D,
-      varianceEpsilon: number, scale?: Array3D|Array1D,
-      offset?: Array3D|Array1D): Array3D {
+      x: Tensor3D, mean: Tensor3D|Tensor1D, variance: Tensor3D|Tensor1D,
+      varianceEpsilon: number, scale?: Tensor3D|Tensor1D,
+      offset?: Tensor3D|Tensor1D): Tensor3D {
     const xValues = x.dataSync();
     const meanValues = mean.dataSync();
     const varianceValues = variance.dataSync();
@@ -1562,13 +1499,13 @@ export class MathBackendCPU implements MathBackend {
               Math.sqrt(
                   varianceValues[i % varianceValues.length] + varianceEpsilon);
     }
-    return Array3D.new(x.shape, outValues);
+    return tensor3d(outValues, x.shape);
   }
 
   batchNormalization4D(
-      x: Array4D, mean: Array4D|Array1D, variance: Array4D|Array1D,
-      varianceEpsilon: number, scale?: Array4D|Array1D,
-      offset?: Array4D|Array1D): Array4D {
+      x: Tensor4D, mean: Tensor4D|Tensor1D, variance: Tensor4D|Tensor1D,
+      varianceEpsilon: number, scale?: Tensor4D|Tensor1D,
+      offset?: Tensor4D|Tensor1D): Tensor4D {
     const xValues = x.dataSync();
     const meanValues = mean.dataSync();
     const varianceValues = variance.dataSync();
@@ -1583,13 +1520,13 @@ export class MathBackendCPU implements MathBackend {
               Math.sqrt(
                   varianceValues[i % varianceValues.length] + varianceEpsilon);
     }
-    return Array4D.new(x.shape, outValues);
+    return tensor4d(outValues, x.shape);
   }
 
   localResponseNormalization4D(
-      x: Array4D, radius: number, bias: number, alpha: number, beta: number,
-      normRegion: 'acrossChannels'|'withinChannel'): Array4D {
-    const output = ops.zeros<Rank.R4>(x.shape);
+      x: Tensor4D, radius: number, bias: number, alpha: number, beta: number,
+      normRegion: 'acrossChannels'|'withinChannel'): Tensor4D {
+    const output = ops.buffer<Rank.R4>(x.shape, 'float32');
     const rad = radius;
     const maxW = output.shape[1] - 1;
     const maxH = output.shape[2] - 1;
@@ -1633,11 +1570,11 @@ export class MathBackendCPU implements MathBackend {
       }
     }
 
-    return output;
+    return output.toTensor();
   }
 
-  multinomial(probabilities: Array2D, numSamples: number, seed: number):
-      Array2D {
+  multinomial(probabilities: Tensor2D, numSamples: number, seed: number):
+      Tensor2D {
     const batchSize = probabilities.shape[0];
     const numEvents = probabilities.shape[1];
     const res = ops.zeros<Rank.R2>([batchSize, numSamples], 'int32');
@@ -1673,31 +1610,30 @@ export class MathBackendCPU implements MathBackend {
     return res;
   }
 
-  oneHot(indices: Array1D, depth: number, onValue: number, offValue: number):
-      Array2D {
+  oneHot(indices: Tensor1D, depth: number, onValue: number, offValue: number):
+      Tensor2D {
     const res = new Float32Array(indices.size * depth);
     res.fill(offValue);
 
     for (let event = 0; event < indices.size; ++event) {
       res[event * depth + indices.get(event)] = onValue;
     }
-    return Array2D.new([indices.size, depth], res);
+    return ops.tensor2d(res, [indices.size, depth]);
   }
 
   private broadcastedBinaryOp(
-      a: NDArray, b: NDArray, dtype: DataType,
-      op: (a: number, b: number) => number): NDArray {
+      a: Tensor, b: Tensor, dtype: DataType,
+      op: (a: number, b: number) => number): Tensor {
     const newShape =
         broadcast_util.assertAndGetBroadcastShape(a.shape, b.shape);
-    const result = ops.zeros(newShape, dtype);
-    const newValues = result.dataSync();
+    const result = ops.buffer(newShape, dtype);
     const aValues = a.dataSync();
     const bValues = b.dataSync();
 
     const aBroadcastDims = broadcast_util.getBroadcastDims(a.shape, newShape);
     const bBroadcastDims = broadcast_util.getBroadcastDims(b.shape, newShape);
 
-    for (let i = 0; i < newValues.length; ++i) {
+    for (let i = 0; i < result.values.length; ++i) {
       const loc = result.indexToLoc(i);
 
       const aLoc = loc.slice(-a.rank);
@@ -1708,24 +1644,21 @@ export class MathBackendCPU implements MathBackend {
       bBroadcastDims.forEach(d => bLoc[d] = 0);
       const bIndex = b.locToIndex(bLoc);
 
-      newValues[i] = op(aValues[aIndex], bValues[bIndex]);
+      result.values[i] = op(aValues[aIndex], bValues[bIndex]);
     }
-    return result;
+    return result.toTensor();
   }
   dispose() {}
 }
 
 ENV.registerBackend('cpu', () => new MathBackendCPU());
 
-// TODO(nsthorat): Deprecate this once we export non-abstract NDArrayMath.
+/** @deprecated Call dl.setBackend('cpu') instead. */
 export class NDArrayMathCPU extends NDArrayMath {
   constructor(safeMode = false) {
     console.warn(
-        'new NDArrayMathCPU() is deprecated. Please use the global ' +
-        'dl.ENV.math. In rare cases, to construct your own NDArrayMath ' +
-        'that runs on CPU, use math = new NDArrayMath(\'cpu\', safeMode); ' +
-        'and make sure to set it as global: dl.ENV.setMath(math);');
+        'new NDArrayMathCPU() is deprecated. Please use ' +
+        'dl.setBackend(\'cpu\').');
     super('cpu', safeMode);
-    ENV.setMath(this);
   }
 }

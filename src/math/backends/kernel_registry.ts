@@ -16,7 +16,8 @@
  */
 
 import * as util from '../../util';
-import {NDArray, Scalar} from '../ndarray';
+import * as ops from '../ops';
+import {Tensor} from '../tensor';
 import {Rank} from '../types';
 import {MathBackend} from './backend';
 import {ArgMaxNode, ArgMinNode} from './types/argminmax';
@@ -25,7 +26,7 @@ import {BatchNorm2DNode, BatchNorm3DNode, BatchNorm4DNode} from './types/batchno
 import {BinaryNode} from './types/binary';
 import {CastNode} from './types/cast';
 // tslint:disable-next-line:max-line-length
-import {Concat1DNode, Concat2DNode, Concat3DNode, Concat4DNode} from './types/concat';
+import {ConcatNode} from './types/concat';
 // tslint:disable-next-line:max-line-length
 import {Conv2DDerBiasNode, Conv2DDerFilterNode, Conv2DDerInputNode, Conv2DNode, DepthwiseConv2DNode} from './types/conv';
 import {GatherNode} from './types/gather';
@@ -41,7 +42,7 @@ import {PoolBackpropNode, PoolNode} from './types/pool';
 import {PowNode} from './types/pow';
 import {PReLUNode} from './types/prelu';
 import {ReshapeNode} from './types/reshape';
-import {ResizeBilinear3DNode} from './types/resize_bilinear';
+import {ResizeBilinearNode} from './types/resize_bilinear';
 import {Reverse4DNode} from './types/reverse';
 // tslint:disable-next-line:max-line-length
 import {Slice1DNode, Slice2DNode, Slice3DNode, Slice4DNode} from './types/slice';
@@ -60,9 +61,6 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
     return backend.matMul(
                config.inputs.a, config.inputs.b, config.args.aOrientation,
                config.args.bOrientation) as O;
-  } else if (kernelName === 'Clone') {
-    const config = inputAndArgs as UnaryNode<R>['inputAndArgs'];
-    return backend.clone(config.inputs.x) as O;
   } else if (kernelName === 'Slice1D') {
     const config = inputAndArgs as Slice1DNode['inputAndArgs'];
     return backend.slice1D(
@@ -82,21 +80,9 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
   } else if (kernelName === 'Reverse4D') {
     const config = inputAndArgs as Reverse4DNode['inputAndArgs'];
     return backend.reverse4D(config.inputs.x, config.args.axis) as O;
-  } else if (kernelName === 'Concat1D') {
-    const config = inputAndArgs as Concat1DNode['inputAndArgs'];
-    return backend.concat1D(config.inputs.a, config.inputs.b) as O;
-  } else if (kernelName === 'Concat2D') {
-    const config = inputAndArgs as Concat2DNode['inputAndArgs'];
-    return backend.concat2D(
-               config.inputs.a, config.inputs.b, config.args.axis) as O;
-  } else if (kernelName === 'Concat3D') {
-    const config = inputAndArgs as Concat3DNode['inputAndArgs'];
-    return backend.concat3D(
-               config.inputs.a, config.inputs.b, config.args.axis) as O;
-  } else if (kernelName === 'Concat4D') {
-    const config = inputAndArgs as Concat4DNode['inputAndArgs'];
-    return backend.concat4D(
-               config.inputs.a, config.inputs.b, config.args.axis) as O;
+  } else if (kernelName === 'Concat') {
+    const config = inputAndArgs as ConcatNode['inputAndArgs'];
+    return backend.concat(config.inputs.a, config.inputs.b) as O;
   } else if (kernelName === 'Neg') {
     const config = inputAndArgs as UnaryNode<R>['inputAndArgs'];
     return backend.neg(config.inputs.x) as O;
@@ -139,12 +125,18 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
   } else if (kernelName === 'GreaterEqual') {
     const config = inputAndArgs as EqualNode['inputAndArgs'];
     return backend.greaterEqual(config.inputs.a, config.inputs.b) as O;
+  } else if (kernelName === 'LogicalNot') {
+    const config = inputAndArgs as UnaryNode<R>['inputAndArgs'];
+    return backend.logicalNot(config.inputs.x) as O;
   } else if (kernelName === 'LogicalAnd') {
     const config = inputAndArgs as LogicalNode['inputAndArgs'];
     return backend.logicalAnd(config.inputs.a, config.inputs.b) as O;
   } else if (kernelName === 'LogicalOr') {
     const config = inputAndArgs as LogicalNode['inputAndArgs'];
     return backend.logicalOr(config.inputs.a, config.inputs.b) as O;
+  } else if (kernelName === 'LogicalXor') {
+    const config = inputAndArgs as LogicalNode['inputAndArgs'];
+    return backend.logicalXor(config.inputs.a, config.inputs.b) as O;
   } else if (kernelName === 'Where') {
     const config = inputAndArgs as WhereNode['inputAndArgs'];
     return backend.where(
@@ -196,7 +188,7 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
     const config = inputAndArgs as ReshapeNode['inputAndArgs'];
     const x = config.inputs.x;
     const newShape = config.args.newShape;
-    return NDArray.make(newShape, {dataId: x.dataId}, x.dtype) as O;
+    return Tensor.make(newShape, {dataId: x.dataId}, x.dtype) as O;
   } else if (kernelName === 'Cast') {
     const config = inputAndArgs as CastNode['inputAndArgs'];
     const x = config.inputs.x;
@@ -205,12 +197,12 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
     if (!util.hasEncodingLoss(x.dtype, newDType)) {
       // We don't change the underlying data, since we cast to higher
       // precision.
-      return NDArray.make(x.shape, {dataId: x.dataId}, newDType) as O;
+      return Tensor.make(x.shape, {dataId: x.dataId}, newDType) as O;
     }
     if (newDType === 'int32') {
       return backend.int(x) as O;
     } else if (newDType === 'bool') {
-      return backend.notEqual(x, Scalar.new(0, x.dtype)) as O;
+      return backend.notEqual(x, ops.scalar(0, x.dtype)) as O;
     } else {
       throw new Error(`Error in Cast: unknown dtype argument (${newDType})`);
     }
@@ -330,10 +322,10 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
   } else if (kernelName === 'MinPool') {
     const config = inputAndArgs as PoolNode['inputAndArgs'];
     return backend.minPool(config.inputs.x, config.args.convInfo) as O;
-  } else if (kernelName === 'ResizeBilinear3D') {
-    const config = inputAndArgs as ResizeBilinear3DNode['inputAndArgs'];
-    return backend.resizeBilinear3D(
-               config.inputs.x, config.args.newShape2D,
+  } else if (kernelName === 'ResizeBilinear') {
+    const config = inputAndArgs as ResizeBilinearNode['inputAndArgs'];
+    return backend.resizeBilinear(
+               config.inputs.x, config.args.newHeight, config.args.newWidth,
                config.args.alignCorners) as O;
   } else if (kernelName === 'BatchNorm4D') {
     const config = inputAndArgs as BatchNorm4DNode['inputAndArgs'];
@@ -375,16 +367,12 @@ executeKernel<R extends Rank, K extends keyof KernelConfigRegistry<R>, O extends
 
 export interface KernelConfigRegistry<R extends Rank> {
   MatMul: MatMulNode;
-  Clone: UnaryNode<R>;
   Slice1D: Slice1DNode;
   Slice2D: Slice2DNode;
   Slice3D: Slice3DNode;
   Slice4D: Slice4DNode;
   Reverse4D: Reverse4DNode;
-  Concat1D: Concat1DNode;
-  Concat2D: Concat2DNode;
-  Concat3D: Concat3DNode;
-  Concat4D: Concat4DNode;
+  Concat: ConcatNode;
   Neg: UnaryNode<R>;
   Add: BinaryNode;
   Sub: BinaryNode;
@@ -399,8 +387,10 @@ export interface KernelConfigRegistry<R extends Rank> {
   LessEqual: EqualNode;
   Greater: EqualNode;
   GreaterEqual: EqualNode;
+  LogicalNot: UnaryNode<R>;
   LogicalAnd: LogicalNode;
   LogicalOr: LogicalNode;
+  LogicalXor: LogicalNode;
   Where: WhereNode;
   TopKValues: TopKValuesNode<R>;
   TopKIndices: TopKIndicesNode;
@@ -452,7 +442,7 @@ export interface KernelConfigRegistry<R extends Rank> {
   AvgPool: PoolNode;
   AvgPoolBackprop: PoolBackpropNode;
   MinPool: PoolNode;
-  ResizeBilinear3D: ResizeBilinear3DNode;
+  ResizeBilinear: ResizeBilinearNode;
   BatchNorm4D: BatchNorm4DNode;
   BatchNorm3D: BatchNorm3DNode;
   BatchNorm2D: BatchNorm2DNode;
@@ -460,3 +450,4 @@ export interface KernelConfigRegistry<R extends Rank> {
   Multinomial: MultinomialNode;
   OneHot: OneHotNode;
 }
+export type Kernel = keyof KernelConfigRegistry<Rank>;

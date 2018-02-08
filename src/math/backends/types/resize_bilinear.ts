@@ -15,16 +15,16 @@
  * =============================================================================
  */
 
-import {Array3D} from '../../ndarray';
+import {Tensor4D} from '../../tensor';
 import {KernelNode} from '../tape_types';
 
-export interface ResizeBilinear3DNode extends KernelNode {
+export interface ResizeBilinearNode extends KernelNode {
   inputAndArgs: {
-    inputs: {x: Array3D;};
-    args: {newShape2D: [number, number]; alignCorners: boolean};
+    inputs: {x: Tensor4D;};
+    args: {newHeight: number; newWidth: number; alignCorners: boolean};
   };
-  output: Array3D;
-  gradient: (dy: Array3D, y: Array3D) => {
-    x: () => Array3D;
+  output: Tensor4D;
+  gradient: (dy: Tensor4D, y: Tensor4D) => {
+    x: () => Tensor4D;
   };
 }
