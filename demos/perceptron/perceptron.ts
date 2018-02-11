@@ -18,19 +18,35 @@
 import * as dl from 'deeplearn';
 
 export async function execute(event?: Event) {
-  let weights: dl.Tensor1D = dl.zeros([2]);
-  console.log("weights "+weights.dataSync());
-  const result = dl.step(weights);
-  console.log(result);
-  let bias:dl.Scalar = dl.scalar(0);
-  let input_vecs=dl.tensor2d([[1,1], [0,0],[1,0], [0,1]]);
-  let label=dl.tensor1d([1,0,0,0]);
-  console.log(label);
-  console.log("input_vecs "+input_vecs.dataSync());
-  console.log(bias);
+  let weights = dl.zeros([2]) as dl.Tensor1D;
+  let bias = dl.scalar(.0) as dl.Scalar;
+  // let input_vecs=dl.tensor2d([[1,1], [0,0],[1,0], [0,1]]);
+  // let label=dl.tensor1d([1,0,0,0]);
   for (let i = 0; i < 10; ++i) {
-    //missing zip()
+    for (let j = 0; j < 4; ++j) {
+      let input_vec=dl.tensor1d([1,1]);
+      let output=dl.step(dl.sum(input_vec.mul(weights)).add(bias));
+      console.log('output'+j+' '+output.dataSync());
+
+      let delta=dl.scalar(.0);
+      if(j==0)delta=dl.scalar(1.0).sub(output);
+      else delta=dl.scalar(.0).sub(output);
+
+      if(j==1){
+        input_vec=dl.tensor1d([0,0]);
+      }else if(j==2){
+        input_vec=dl.tensor1d([1,0]);
+      }else if(j==3){
+        input_vec=dl.tensor1d([0,1]);
+      }
+      weights=weights.add(input_vec.mul(delta).mul(dl.scalar(0.1)));
+      console.log('weights'+j+' '+weights.dataSync());
+      bias=bias.add(delta.mul(dl.scalar(0.1)));
+      console.log('bias'+j+' '+bias.dataSync());
+    }
   }
+  console.log(weights.dataSync())
+  console.log(bias.dataSync())
 }
 
 execute();
