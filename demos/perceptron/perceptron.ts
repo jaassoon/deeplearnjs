@@ -25,13 +25,6 @@ export async function execute(event?: Event) {
   for (let i = 0; i < 10; ++i) {
     for (let j = 0; j < 4; ++j) {
       let input_vec=dl.tensor1d([1,1]);
-      let output=dl.step(dl.sum(input_vec.mul(weights)).add(bias));
-      console.log('output'+j+' '+output.dataSync());
-
-      let delta=dl.scalar(.0);
-      if(j==0)delta=dl.scalar(1.0).sub(output);
-      else delta=dl.scalar(.0).sub(output);
-
       if(j==1){
         input_vec=dl.tensor1d([0,0]);
       }else if(j==2){
@@ -39,6 +32,10 @@ export async function execute(event?: Event) {
       }else if(j==3){
         input_vec=dl.tensor1d([0,1]);
       }
+      let output=dl.step(dl.sum(input_vec.mul(weights)).add(bias));
+      let delta=dl.scalar(.0);
+      if(j==0)delta=dl.scalar(1.0).sub(output);
+      else delta=dl.scalar(.0).sub(output);
       weights=weights.add(input_vec.mul(delta).mul(dl.scalar(0.1)));
       console.log('weights'+j+' '+weights.dataSync());
       bias=bias.add(delta.mul(dl.scalar(0.1)));
