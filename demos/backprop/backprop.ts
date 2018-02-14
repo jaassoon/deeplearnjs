@@ -91,8 +91,8 @@ class ConstNode{
         return node_str + '\n\tdownstream:' + downstream_str*/
 }
 class Connection{
-  protected upstream_node:Node;
-  protected downstream_node:Node;
+  upstream_node:Node;
+  downstream_node:Node;
   protected weight:number;
   protected gradient:number;
   constructor(upstream_node:Node, downstream_node:Node){
@@ -110,18 +110,20 @@ class Connection{
   }
   get_gradient(){return this.gradient}
 
-     toString(){
-        return '(%u-%u) -> (%u-%u) = %f' % (
-            this.upstream_node.layer_index, 
-            this.upstream_node.node_index,
-            this.downstream_node.layer_index, 
-            this.downstream_node.node_index, 
-            this.weight)
-     }
+  toString(){
+    console.log(`
+    // return '(%u-%u) -> (%u-%u) = %f' % (
+      $this.upstream_node.layer_index, 
+      $this.upstream_node.node_index,
+      $this.downstream_node.layer_index, 
+      $this.downstream_node.node_index, 
+      $this.weight
+      `)
+  }
 }
 class Layer{
   protected layer_index:number;
-  protected nodes:any[];
+  nodes:any[];
   constructor(layer_index:number, node_count:number){
     this.layer_index = layer_index
     this.nodes = []
@@ -136,12 +138,12 @@ class Layer{
     }
   }
   calc_output(){
-    // for(let node in this.nodes[:-1])
-            // node.calc_output()
+    for(let i=0,node=this.nodes[i];i<this.nodes.length-1;i++)
+      node.calc_output()
   }
   dump(){
-        // for node in self.nodes:
-            // print node
+    for(let i=0,node=this.nodes[i];i<this.nodes.length;i++)
+      console.dir(node)
   }
 }
 class Network{
@@ -150,39 +152,37 @@ class Network{
   constructor(layers:any[]) {
     this.connections = new Connections();
     this.layers=new Array<Layer>();
-    const layer_count = layers.length;
-    const node_count = 0;
-    console.log(node_count)
-    for(let i=0;i<layer_count;i++){
-      this.layers.push(new Layer(i,layers[i]));
+    const layer_count = layers.length;//[8,3,8]
+    for(let i=0;i<layer_count;i++){this.layers.push(new Layer(i,layers[i]))}
+    console.dir(this.layers)
+    for(let i=0;i<layer_count-1;i++){//layer_count=3
+      let connections=[];
+      for(let j=0;j<this.layers[i].nodes.length;j++){
+        let upstream_node=this.layers[i].nodes[j];
+        for (let k = 0; k < this.layers[i+1].nodes.length-1; k++) {
+          let downstream=this.layers[i+1].nodes[k];
+          connections.push(new Connection(upstream_node,downstream))
+        }
+      }
+      for(let i=0,conn=connections[i];i<connections.length;i++){
+        this.connections.add_connection(conn)
+        conn.downstream_node.append_upstream_connection(conn)
+        conn.upstream_node.append_downstream_connection(conn)
+      }
     }
-    for(let layer=0;layer<layer_count-1;layer++){
-      // this.connections = [Connection(upstream_node, downstream_node) 
-                           // for upstream_node in self.layers[layer].nodes
-                           // for downstream_node in self.layers[layer + 1].nodes[:-1]]
-    }
-    //       for layer in range(layer_count - 1):
-              // connections = [Connection(upstream_node, downstream_node) 
-              //                for upstream_node in self.layers[layer].nodes
-              //                for downstream_node in self.layers[layer + 1].nodes[:-1]]
-    //           for conn in connections:
-    //               self.connections.add_connection(conn)
-    //               conn.downstream_node.append_upstream_connection(conn)
-    //               conn.upstream_node.append_downstream_connection(conn)
   }
-
-  train(labels, data_set, rate, epoch){
+  train(labels:any[], data_set:any[], rate:number, epoch:number){
         // for i in range(epoch):
         //     for d in range(len(data_set)):
         //         this.train_one_sample(labels[d], data_set[d], rate)
         //         # print 'sample %d training finished' % d
   }
-  train_one_sample(label, sample, rate){
+  train_one_sample(label:any[], sample:any[], rate:number){
         // this.predict(sample)
         // this.calc_delta(label)
         // this.update_weight(rate)
   }
-  calc_delta(label){
+  calc_delta(label:any[]){
         // output_nodes = this.layers[-1].nodes
         // for i in range(len(label)):
         //     output_nodes[i].calc_output_layer_delta(label[i])
@@ -190,7 +190,7 @@ class Network{
         //     for node in layer.nodes:
         //         node.calc_hidden_layer_delta()
   }
-  update_weight(rate){
+  update_weight(rate:number){
         // for layer in this.layers[:-1]:
         //     for node in layer.nodes:
         //         for conn in node.downstream:
@@ -214,16 +214,15 @@ class Network{
         // return map(lambda node: node.output, this.layers[-1].nodes[:-1])
   }
   dump(){
-    for(let layer as Layer in this.layers){
-      layer.dump()
-    }
+    // for(let layer as Layer in this.layers){
+    //   layer.dump()
+    // }
   }
 }
 class Connections{
   protected conn:Connection[];
-  add_connection(connection:Connection){
-    this.conn.push(connection);
-  }
+  constructor(){this.conn=new Array<Connection>()}
+  add_connection(connection:Connection){this.conn.push(connection);}
   dump(){for(let i=0;i<this.conn.length;i++)this.conn[i].toString()}
 }
 const a=new Network([8,3,8]);
