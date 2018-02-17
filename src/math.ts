@@ -76,19 +76,14 @@ export class NDArrayMath {
   /** @deprecated */
   maxPoolBackprop = pool.Ops.maxPoolBackprop;
 
-  conv1d = conv.Ops.conv1d;
-  conv2d = conv.Ops.conv2d;
   conv2dTranspose = conv.Ops.conv2dTranspose;
   depthwiseConv2D = conv.Ops.depthwiseConv2d;
-  /** @deprecated */
-  conv2dDerBias = conv.Ops.conv2dDerBias;
   /** @deprecated */
   conv2dDerFilter = conv.Ops.conv2dDerFilter;
   /** @deprecated */
   conv2dDerInput = conv.Ops.conv2dDerInput;
 
   argMax = reduction_ops.Ops.argMax;
-  argMaxEquals = reduction_ops.Ops.argMaxEquals;
   argMin = reduction_ops.Ops.argMin;
   logSumExp = reduction_ops.Ops.logSumExp;
   max = reduction_ops.Ops.max;
@@ -346,6 +341,41 @@ export class NDArrayMath {
   /** @deprecated */
   concat4D(a: Tensor4D, b: Tensor4D, axis: number): Tensor4D {
     return ops.concat4d([a, b], axis);
+  }
+
+  /** @deprecated */
+  conv1d<T extends Tensor2D|Tensor3D>(
+      input: T, filter: Tensor3D, bias: Tensor1D|null, stride: number,
+      pad: 'valid'|'same'|number, dimRoundingMode?: 'floor'|'round'|'ceil'): T {
+    if (bias != null) {
+      util.assert(
+          bias.rank === 1,
+          `Error in conv1d: bias must be rank 1, but got rank ` +
+              `${bias.rank}.`);
+    }
+    const res = ops.conv1d(input, filter, stride, pad, dimRoundingMode);
+    return res.add(bias) as T;
+  }
+
+  /** @deprecated */
+  conv2d<T extends Tensor3D|Tensor4D>(
+      x: T, filter: Tensor4D, bias: Tensor1D|null,
+      strides: [number, number]|number, pad: 'valid'|'same'|number,
+      dimRoundingMode?: 'floor'|'round'|'ceil'): T {
+    if (bias != null) {
+      util.assert(
+          bias.rank === 1,
+          `Error in conv2d: bias must be rank 1, but got rank ` +
+              `${bias.rank}.`);
+    }
+    const res = ops.conv2d(x, filter, strides, pad, dimRoundingMode);
+    return res.add(bias) as T;
+  }
+
+  /** @deprecated */
+  argMaxEquals(x1: Tensor, x2: Tensor): Scalar {
+    util.assertShapesMatch(x1.shape, x2.shape, 'Error in argMaxEquals: ');
+    return x1.argMax().equal(x2.argMax());
   }
 }
 

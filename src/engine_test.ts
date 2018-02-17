@@ -218,13 +218,13 @@ describeWithFlags('gradients', ALL_ENVS, () => {
     expect(da.shape).toEqual(a.shape);
     let transposeA = false;
     let transposeB = true;
-    expectArraysClose(da, dl.matMul(dedm, b, transposeA, transposeB), 1e-1);
+    expectArraysClose(da, dl.matMul(dedm, b, transposeA, transposeB));
 
     // de/db = dot(aT, de/dy)
     expect(db.shape).toEqual(b.shape);
     transposeA = true;
     transposeB = false;
-    expectArraysClose(db, dl.matMul(a, dedm, transposeA, transposeB), 1e-1);
+    expectArraysClose(db, dl.matMul(a, dedm, transposeA, transposeB));
   });
 
   it('grad(f)', () => {
@@ -233,10 +233,28 @@ describeWithFlags('gradients', ALL_ENVS, () => {
     expectArraysClose(result, [.2, .4]);
   });
 
+  it('calling grad(f) twice works', () => {
+    const grad = dl.grad(x => x.square());
+
+    const result = grad(dl.tensor1d([.1, .2]));
+    const result2 = grad(dl.tensor1d([.1, .4]));
+    expectArraysClose(result, [.2, .4]);
+    expectArraysClose(result2, [.2, .8]);
+  });
+
   it('grads(f)', () => {
     const grads = dl.grads(x => x.square());
     const result = grads([dl.tensor1d([.1, .2])]);
     expectArraysClose(result[0], [.2, .4]);
+  });
+
+  it('calling grads(f) twice works', () => {
+    const grads = dl.grads(x => x.square());
+
+    const result = grads([dl.tensor1d([.1, .2])]);
+    const result2 = grads([dl.tensor1d([.1, .4])]);
+    expectArraysClose(result[0], [.2, .4]);
+    expectArraysClose(result2[0], [.2, .8]);
   });
 
   it('works with reshape', () => {
@@ -312,7 +330,7 @@ describeWithFlags('valueAndGradients', ALL_ENVS, () => {
           return dl.sum(y);
         })([a, b]);
 
-    expectNumbersClose(value.get(), 10, 1e-1);
+    expectNumbersClose(value.get(), 10);
 
     // de/dy = 1
     // dy/dm = step(m)
@@ -323,12 +341,12 @@ describeWithFlags('valueAndGradients', ALL_ENVS, () => {
     // de/da = dot(de/dy, bT)
     let transposeA = false;
     let transposeB = true;
-    expectArraysClose(da, dl.matMul(dedm, b, transposeA, transposeB), 1e-1);
+    expectArraysClose(da, dl.matMul(dedm, b, transposeA, transposeB));
 
     // de/db = dot(aT, de/dy)
     transposeA = true;
     transposeB = false;
-    expectArraysClose(db, dl.matMul(a, dedm, transposeA, transposeB), 1e-1);
+    expectArraysClose(db, dl.matMul(a, dedm, transposeA, transposeB));
   });
 
   it('matmul + relu + inner tidy', () => {
@@ -347,7 +365,7 @@ describeWithFlags('valueAndGradients', ALL_ENVS, () => {
           });
         })([a, b]);
 
-    expectNumbersClose(value.get(), 10, 1e-1);
+    expectNumbersClose(value.get(), 10);
 
     // de/dy = 1
     // dy/dm = step(m)
@@ -358,12 +376,12 @@ describeWithFlags('valueAndGradients', ALL_ENVS, () => {
     // de/da = dot(de/dy, bT)
     let transposeA = false;
     let transposeB = true;
-    expectArraysClose(da, dl.matMul(dedm, b, transposeA, transposeB), 1e-1);
+    expectArraysClose(da, dl.matMul(dedm, b, transposeA, transposeB));
 
     // de/db = dot(aT, de/dy)
     transposeA = true;
     transposeB = false;
-    expectArraysClose(db, dl.matMul(a, dedm, transposeA, transposeB), 1e-1);
+    expectArraysClose(db, dl.matMul(a, dedm, transposeA, transposeB));
   });
 });
 
@@ -390,7 +408,7 @@ describeWithFlags('customGradient', ALL_ENVS, () => {
 
     const customPow = dl.customGrad(a => {
       const value = dl.pow(a, b);
-      const gradFunc = (dy: Tensor) => [dy.mul(dl.scalar(0.1))];
+      const gradFunc = (dy: Tensor) => dy.mul(dl.scalar(0.1));
       return {value, gradFunc};
     });
 
@@ -409,7 +427,7 @@ describeWithFlags('customGradient', ALL_ENVS, () => {
 
     const customPow = dl.customGrad(a => {
       const value = dl.pow(a, b);
-      const gradFunc = (dy: Tensor) => [dy.mul(a)];
+      const gradFunc = (dy: Tensor) => dy.mul(a);
       return {value, gradFunc};
     });
 
@@ -418,6 +436,18 @@ describeWithFlags('customGradient', ALL_ENVS, () => {
 
     // First order: dy * a. Second order: dy.
     expectArraysClose(dda, dy);
+  });
+
+  it('calling gradient of custom op twice works', () => {
+    const customOp = dl.customGrad(x => {
+      // Override gradient of our custom x ^ 2 op to be dy * abs(x);
+      return {value: x.square(), gradFunc: dy => dy.mul(x.abs())};
+    });
+    const x = dl.tensor1d([-1, -2, 3]);
+    const grad = dl.grad(x => customOp(x));
+
+    expectArraysClose(grad(x), [1, 2, 3]);
+    expectArraysClose(grad(x), [1, 2, 3]);
   });
 });
 

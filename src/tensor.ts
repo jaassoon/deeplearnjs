@@ -511,6 +511,12 @@ export class Tensor<R extends Rank = Rank> {
     this.throwIfDisposed();
     return ops.matMul(this as Tensor2D, b, transposeA, transposeB);
   }
+  norm(
+      ord: number|'euclidean'|'fro' = 'euclidean', axis: number|number[] = null,
+      keepDims = false): Tensor {
+    this.throwIfDisposed();
+    return ops.norm(this, ord, axis, keepDims);
+  }
   slice(begin: ShapeMap[R], size: ShapeMap[R]): Tensor<R> {
     this.throwIfDisposed();
     return ops.slice(this, begin, size);
@@ -569,10 +575,6 @@ export class Tensor<R extends Rank = Rank> {
   argMax<T extends Tensor>(axis: number = null): T {
     this.throwIfDisposed();
     return ops.argMax(this, axis);
-  }
-  argMaxEquals(x: Tensor): Scalar {
-    this.throwIfDisposed();
-    return ops.argMaxEquals(this, x);
   }
 
   // Binary ops.
@@ -740,7 +742,7 @@ export class Tensor<R extends Rank = Rank> {
     this.throwIfDisposed();
     return ops.abs(this);
   }
-  clip(min: number, max: number): Tensor<R> {
+  clipByValue(min: number, max: number): Tensor<R> {
     this.throwIfDisposed();
     return ops.clipByValue(this, min, max);
   }
@@ -822,17 +824,16 @@ export class Tensor<R extends Rank = Rank> {
 
   // Convolutions.
   conv1d<T extends Tensor2D|Tensor3D>(
-      this: T, filter: Tensor3D, bias: Tensor1D|null, stride: number,
-      pad: 'valid'|'same'|number, dimRoundingMode?: 'floor'|'round'|'ceil'): T {
-    (this as Tensor).throwIfDisposed();
-    return ops.conv1d(this, filter, bias, stride, pad, dimRoundingMode);
-  }
-  conv2d<T extends Tensor3D|Tensor4D>(
-      this: T, filter: Tensor4D, bias: Tensor1D|null,
-      strides: [number, number]|number, pad: 'valid'|'same'|number,
+      this: T, filter: Tensor3D, stride: number, pad: 'valid'|'same'|number,
       dimRoundingMode?: 'floor'|'round'|'ceil'): T {
     (this as Tensor).throwIfDisposed();
-    return ops.conv2d(this, filter, bias, strides, pad, dimRoundingMode);
+    return ops.conv1d(this, filter, stride, pad, dimRoundingMode);
+  }
+  conv2d<T extends Tensor3D|Tensor4D>(
+      this: T, filter: Tensor4D, strides: [number, number]|number,
+      pad: 'valid'|'same'|number, dimRoundingMode?: 'floor'|'round'|'ceil'): T {
+    (this as Tensor).throwIfDisposed();
+    return ops.conv2d(this, filter, strides, pad, dimRoundingMode);
   }
   conv2dTranspose<T extends Tensor3D|Tensor4D>(
       this: T, filter: Tensor4D,
@@ -879,6 +880,11 @@ export class Tensor<R extends Rank = Rank> {
       normRegion: 'acrossChannels'|'withinChannel' = 'acrossChannels'): T {
     return ops.localResponseNormalization(
         this, radius, bias, alpha, beta, normRegion);
+  }
+
+  variable(trainable = true, name?: string, dtype?: DataType): Variable<R> {
+    this.throwIfDisposed();
+    return Variable.variable(this, trainable, name, dtype);
   }
 }
 
@@ -955,6 +961,12 @@ export class Variable<R extends Rank = Rank> extends Tensor<R> {
 
   /**
    * Creates a new variable with the provided initial value.
+   * ```js
+   * const x = dl.variable(dl.tensor([1, 2, 3]));
+   * x.assign(dl.tensor([4, 5, 6]));
+   *
+   * x.print();
+   * ```
    *
    * @param initialValue A tensor.
    * @param trainable If true, optimizers are allowed to update it.
@@ -972,8 +984,8 @@ export class Variable<R extends Rank = Rank> extends Tensor<R> {
   }
 
   /**
-   * Assign a new `Tensor` to this variable. The new `Tensor` must have the same
-   * shape and dtype as the old `Tensor`.
+   * Assign a new `Tensor` to this variable. The new `Tensor` must have the
+   * same shape and dtype as the old `Tensor`.
    */
   @doc({heading: 'Tensors', subheading: 'Classes'})
   assign(newValue: Tensor<R>): void {

@@ -20,6 +20,8 @@ import * as dl from '../index';
 import {ALL_ENVS, describeWithFlags, expectArraysClose, expectNumbersClose, WEBGL_ENVS} from '../test_util';
 import {Rank} from '../types';
 
+import {Ops as MatmulOps} from './matmul';
+
 describeWithFlags('matmul', ALL_ENVS, () => {
   it('A x B', () => {
     const a = dl.tensor2d([1, 2, 3, 4, 5, 6], [2, 3]);
@@ -193,7 +195,7 @@ describeWithFlags('matmul', ALL_ENVS, () => {
   it('Dot product', () => {
     const v1 = dl.tensor1d([2, 3]);
     const v2 = dl.tensor1d([2, 1]);
-    const result = dl.dotProduct(v1, v2);
+    const result = MatmulOps.dotProduct(v1, v2);
 
     expectNumbersClose(result.get(), 7);
   });
@@ -201,7 +203,7 @@ describeWithFlags('matmul', ALL_ENVS, () => {
   it('Dot product propagates NaNs', () => {
     const v1 = dl.tensor1d([2, NaN]);
     const v2 = dl.tensor1d([2, 1]);
-    const result = dl.dotProduct(v1, v2);
+    const result = MatmulOps.dotProduct(v1, v2);
     expect(result.get()).toEqual(NaN);
   });
 
@@ -209,8 +211,8 @@ describeWithFlags('matmul', ALL_ENVS, () => {
     const v1 = dl.tensor1d([2, 3, 3]);
     const v2 = dl.tensor1d([2, 1]);
 
-    expect(() => dl.dotProduct(v1, v2)).toThrowError();
-    expect(() => dl.dotProduct(v2, v1)).toThrowError();
+    expect(() => MatmulOps.dotProduct(v1, v2)).toThrowError();
+    expect(() => MatmulOps.dotProduct(v2, v1)).toThrowError();
   });
 
   it('Dot product throws when passed non vectors', () => {
@@ -218,8 +220,8 @@ describeWithFlags('matmul', ALL_ENVS, () => {
     const v1: any = dl.tensor2d([1, 2, 3, 3], [2, 2]);
     const v2 = dl.tensor1d([2, 1]);
 
-    expect(() => dl.dotProduct(v1, v2)).toThrowError();
-    expect(() => dl.dotProduct(v2, v1)).toThrowError();
+    expect(() => MatmulOps.dotProduct(v1, v2)).toThrowError();
+    expect(() => MatmulOps.dotProduct(v2, v1)).toThrowError();
   });
 
   it('Outer product', () => {
@@ -232,7 +234,6 @@ describeWithFlags('matmul', ALL_ENVS, () => {
     expectArraysClose(result, expected);
   });
 
-  // TODO(nsthorat): fix the precision for backprop.
   it('gradients: A * B', () => {
     const a = dl.tensor2d([1, 2, 3, 10, 20, 30], [2, 3]);
     const b = dl.tensor2d([2, 3, 4, 1, 2, 3], [3, 2]);
@@ -262,17 +263,14 @@ describeWithFlags('matmul', ALL_ENVS, () => {
 
     // db = aT * dy
     expect(db.shape).toEqual(b.shape);
-    expectArraysClose(
-        db,
-        [
-          a.get(0, 0) * dy.get(0, 0) + a.get(1, 0) * dy.get(1, 0),
-          a.get(0, 0) * dy.get(0, 1) + a.get(1, 0) * dy.get(1, 1),
-          a.get(0, 1) * dy.get(0, 0) + a.get(1, 1) * dy.get(1, 0),
-          a.get(0, 1) * dy.get(0, 1) + a.get(1, 1) * dy.get(1, 1),
-          a.get(0, 2) * dy.get(0, 0) + a.get(1, 2) * dy.get(1, 0),
-          a.get(0, 2) * dy.get(0, 1) + a.get(1, 2) * dy.get(1, 1)
-        ],
-        1e-1);
+    expectArraysClose(db, [
+      a.get(0, 0) * dy.get(0, 0) + a.get(1, 0) * dy.get(1, 0),
+      a.get(0, 0) * dy.get(0, 1) + a.get(1, 0) * dy.get(1, 1),
+      a.get(0, 1) * dy.get(0, 0) + a.get(1, 1) * dy.get(1, 0),
+      a.get(0, 1) * dy.get(0, 1) + a.get(1, 1) * dy.get(1, 1),
+      a.get(0, 2) * dy.get(0, 0) + a.get(1, 2) * dy.get(1, 0),
+      a.get(0, 2) * dy.get(0, 1) + a.get(1, 2) * dy.get(1, 1)
+    ]);
   });
 });
 
