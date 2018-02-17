@@ -36,12 +36,12 @@ export async function execute(event?: Event) {
   console.log('bias='+bias.dataSync())
 }
 class Node{
-  protected layer_index:number;
-  protected node_index:number;
-  protected downstream:Connection[];
-  protected upstream:Connection[];
-  protected output=0;
-  protected delta=0;
+  layer_index:number;
+  node_index:number;
+  downstream:Connection[];
+  upstream:Connection[];
+  output=0;
+  delta=0;
   constructor(layer_index:number, node_index:number){
     this.layer_index = layer_index;
     this.node_index = node_index;
@@ -97,28 +97,25 @@ class Connection{
   protected gradient:number;
   constructor(upstream_node:Node, downstream_node:Node){
     this.upstream_node = upstream_node
-    this.downstream_node = downstream_node
-    // this.weight = dl.uniform(-0.1, 0.1)
+    this.downstream_node = downstream_node;
+    this.weight =dl.util.randUniform(-0.1, 0.1);
     this.gradient = 0.0
   }
   calc_gradient(){
-    // this.gradient = this.downstream_node.delta * this.upstream_node.output
+    this.gradient = this.downstream_node.delta * this.upstream_node.output
   }
   update_weight(rate:number){
     this.calc_gradient()
     this.weight += rate * this.gradient
   }
   get_gradient(){return this.gradient}
-
   toString(){
-    console.log(`
-    // return '(%u-%u) -> (%u-%u) = %f' % (
-      $this.upstream_node.layer_index, 
-      $this.upstream_node.node_index,
-      $this.downstream_node.layer_index, 
-      $this.downstream_node.node_index, 
-      $this.weight
-      `)
+    console.log(`(
+      ${this.upstream_node.layer_index}-
+      ${this.upstream_node.node_index})->(
+      ${this.downstream_node.layer_index}-
+      ${this.downstream_node.node_index})=
+      ${this.weight}`);
   }
 }
 class Layer{
