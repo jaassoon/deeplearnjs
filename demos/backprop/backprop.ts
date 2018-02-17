@@ -76,9 +76,7 @@ class ConstNode{
     this.node_index = node_index;
     this.downstream = [];
   }
-  append_downstream_connection(conn:Connection){
-    this.downstream.push(conn);
-  }
+  append_downstream_connection(conn:Connection){this.downstream.push(conn)}
   calc_hidden_layer_delta(){
         // downstream_delta = reduce(
         //     lambda ret, conn: ret + conn.downstream_node.delta * conn.weight,
@@ -169,51 +167,65 @@ class Network{
     }
   }
   train(labels:any[], data_set:any[], rate:number, epoch:number){
-        // for i in range(epoch):
-        //     for d in range(len(data_set)):
-        //         this.train_one_sample(labels[d], data_set[d], rate)
-        //         # print 'sample %d training finished' % d
+    for(let i=0;i<epoch;i++){
+      for(let d=0;d<data_set.length;d++){
+        this.train_one_sample(labels[d], data_set[d], rate)
+        console.log('sample ${d} training finished')
+      }
+    }
   }
   train_one_sample(label:any[], sample:any[], rate:number){
-        // this.predict(sample)
-        // this.calc_delta(label)
-        // this.update_weight(rate)
+    this.predict(sample)
+    this.calc_delta(label)
+    this.update_weight(rate)
   }
   calc_delta(label:any[]){
-        // output_nodes = this.layers[-1].nodes
-        // for i in range(len(label)):
-        //     output_nodes[i].calc_output_layer_delta(label[i])
-        // for layer in this.layers[-2::-1]:
-        //     for node in layer.nodes:
-        //         node.calc_hidden_layer_delta()
+    let layersCnt=this.layers.length;
+    let output_nodes = this.layers[layersCnt-1].nodes
+    for(let i=0;i<label.length;i++){
+      output_nodes[i].calc_output_layer_delta(label[i])
+    }
+    for(let i=layersCnt-2,layer=this.layers[i];i<layersCnt;i++){
+      for(let j=0,node=layer.nodes[j];j<layer.nodes.length;j++){
+        node.calc_hidden_layer_delta()
+      }
+    }
   }
   update_weight(rate:number){
-        // for layer in this.layers[:-1]:
-        //     for node in layer.nodes:
-        //         for conn in node.downstream:
-        //             conn.update_weight(rate)
+    for(let i=0,layer=this.layers[i];i<this.layers.length-1;i++){
+      for(let j=0,node=layer.nodes[j];j<layer.nodes.length;j++){
+        for(let k=0,conn=node.downstream[k];k<node.downstream.length;k++){
+          conn.update_weight(rate)
+        }
+      }
+    }
   }
   calc_gradient(){
-        // for layer in self.layers[:-1]:
-        //     for node in layer.nodes:
-        //         for conn in node.downstream:
-        //             conn.calc_gradient()
+    for(let i=0,layer=this.layers[i];i<this.layers.length-1;i++){
+      for(let j=0,node=layer.nodes[j];j<layer.nodes.length;j++){
+        for(let k=0,conn=node.downstream[k];k<node.downstream.length;k++){
+          conn.calc_gradient()
+        }
+      }
+    }
   }
-  get_gradient(label:number, sample:number){
-        // this.predict(sample)
-        // this.calc_delta(label)
-        // this.calc_gradient()
+  get_gradient(label:any[], sample:any[]){
+    this.predict(sample)
+    this.calc_delta(label)
+    this.calc_gradient()
   }
-  predict(sample:number){
-        // this.layers[0].set_output(sample)
-        // for i in range(1, len(this.layers)):
-        //     this.layers[i].calc_output()
+  predict(sample:any[]){
+    this.layers[0].set_output(sample)
+    for(let i=1;i<this.layers.length;i++){
+      this.layers[i].calc_output()
+    }
+    return
         // return map(lambda node: node.output, this.layers[-1].nodes[:-1])
   }
   dump(){
-    // for(let layer as Layer in this.layers){
-    //   layer.dump()
-    // }
+    for(let i=0,layer=this.layers[i];i<this.layers.length;i++){
+      layer.dump()
+    }
   }
 }
 class Connections{
