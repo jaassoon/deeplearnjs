@@ -70,11 +70,15 @@ class Node{
   calc_output_layer_delta(label:number){
     this.delta=this.output.mul(dl.scalar(1).sub(this.output)).mul(dl.scalar(label).sub(this.output))
   }
-    // __str__(){
-    //     node_str = '%u-%u: output: %f delta: %f' % (self.layer_index, self.node_index, self.output, self.delta)
-    //     downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
-    //     upstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.upstream, '')
-    //     return node_str + '\n\tdownstream:' + downstream_str + '\n\tupstream:' + upstream_str 
+  toString(){
+    let node_str = '%d-%d: output: %f delta: %f';
+    // let downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), this.downstream, '')
+    // let upstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), this.upstream, '')
+    // return node_str + '\n\tdownstream:' + downstream_str + '\n\tupstream:' + upstream_str 
+    console.log(node_str,this.layer_index,this.node_index,
+      Number(this.output.dataSync()[0].toFixed(6)),
+      Number(this.delta.dataSync()[0].toFixed(6)))
+  }
 }
 class ConstNode{
   layer_index:number;
@@ -96,11 +100,12 @@ class ConstNode{
     }
     this.delta = this.output.mul(dl.scalar(1).sub(this.output)).mul(downstream_delta)
   }
-     // __str__(){
-     //    let node_str = '%u-%u: output: 1' % (self.layer_index, self.node_index)
-     //    downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
-     //    return node_str + '\n\tdownstream:' + downstream_str
-     //    }
+  toString(){
+    let node_str = '${this.layer_index}-${this.node_index}: output: 1';
+    // downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
+    // return node_str + '\n\tdownstream:' + downstream_str
+    console.log(node_str)
+  }
 }
 class Connection{
   upstream_node:Node;
@@ -146,12 +151,12 @@ class Layer{
     }
   }
   calc_output(){
-    for(let i=0,node=this.nodes[i];i<this.nodes.length-1;i++)
-      node.calc_output()
+    for(let i=0;i<this.nodes.length-1;i++)
+      this.nodes[i].calc_output()
   }
   dump(){
-    for(let i=0,node=this.nodes[i];i<this.nodes.length;i++)
-      console.dir(node)
+    for(let i=0;i<this.nodes.length;i++)
+      this.nodes[i].toString()
   }
 }
 class Network{
@@ -162,7 +167,6 @@ class Network{
     this.layers=new Array<Layer>();
     const layer_count = layers.length;//[8,3,8]
     for(let i=0;i<layer_count;i++){this.layers.push(new Layer(i,layers[i]))}
-    console.dir(this.layers)
     for(let i=0;i<layer_count-1;i++){//layer_count=3
       let connections=[];
       for(let j=0;j<this.layers[i].nodes.length;j++){
@@ -182,10 +186,11 @@ class Network{
   }
   train(labels:any[], data_set:any[], rate:number, epoch:number){
     for(let i=0;i<epoch;i++){
-      if(i==2)break;//FIXME
+      if(i==1)break;//FIXME
       for(let d=0;d<data_set.length;d++){
+        if(d==3)break;//FIXME
         this.train_one_sample(labels[d], data_set[d], rate)
-        console.log('sample ${d} training finished')
+        console.log('sample %d training finished',d)
       }
     }
   }
@@ -207,19 +212,23 @@ class Network{
     }
   }
   update_weight(rate:number){
-    for(let i=0,layer=this.layers[i];i<this.layers.length-1;i++){
-      for(let j=0,node=layer.nodes[j];j<layer.nodes.length;j++){
-        for(let k=0,conn=node.downstream[k];k<node.downstream.length;k++){
-          conn.update_weight(rate)
+    for(let i=0;i<this.layers.length-1;i++){
+      let layer=this.layers[i]
+      for(let j=0;j<layer.nodes.length;j++){
+        let node=layer.nodes[j]
+        for(let k=0;k<node.downstream.length;k++){
+          node.downstream[k].update_weight(rate)
         }
       }
     }
   }
   calc_gradient(){
-    for(let i=0,layer=this.layers[i];i<this.layers.length-1;i++){
-      for(let j=0,node=layer.nodes[j];j<layer.nodes.length;j++){
-        for(let k=0,conn=node.downstream[k];k<node.downstream.length;k++){
-          conn.calc_gradient()
+    for(let i=0;i<this.layers.length-1;i++){
+      let layer=this.layers[i]
+      for(let j=0;j<layer.nodes.length;j++){
+        let node=layer.nodes[j]
+        for(let k=0;k<node.downstream.length;k++){
+          node.downstream[k].calc_gradient()
         }
       }
     }
@@ -242,8 +251,8 @@ class Network{
     return ret;
   }
   dump(){
-    for(let i=0,layer=this.layers[i];i<this.layers.length;i++){
-      layer.dump()
+    for(let i=0;i<this.layers.length;i++){
+      this.layers[i].dump()
     }
   }
 }
@@ -290,3 +299,4 @@ function train(network:Network){
 const net=new Network([8,3,8]);
 console.log(net)
 train(net)
+net.dump()
