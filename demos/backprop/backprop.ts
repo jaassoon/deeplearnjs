@@ -45,6 +45,8 @@ class Node{
   constructor(layer_index:number, node_index:number){
     this.layer_index = layer_index;
     this.node_index = node_index;
+    this.upstream=new Array<Connection>();
+    this.downstream=new Array<Connection>();
   }
   set_output(output:dl.Scalar){this.output=output}
   append_downstream_connection(conn:Connection){this.downstream.push(conn)}
@@ -164,10 +166,11 @@ class Network{
           connections.push(new Connection(upstream_node,downstream))
         }
       }
-      for(let i=0,conn=connections[i];i<connections.length;i++){
-        this.connections.add_connection(conn)
+      for(let i=0;i<connections.length;i++){
+        let conn=connections[i];
         conn.downstream_node.append_upstream_connection(conn)
         conn.upstream_node.append_downstream_connection(conn)
+        this.connections.add_connection(conn)
       }
     }
   }
@@ -239,5 +242,10 @@ class Connections{
   add_connection(connection:Connection){this.conn.push(connection);}
   dump(){for(let i=0;i<this.conn.length;i++)this.conn[i].toString()}
 }
-const a=new Network([8,3,8]);
-console.log(a)
+function train(network:Network){
+    // labels, data_set = train_data_set()
+    // network.train(labels, data_set, 0.3, 50)
+}
+const net=new Network([8,3,8]);
+console.log(net)
+train(net)
