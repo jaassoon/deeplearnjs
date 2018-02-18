@@ -48,21 +48,24 @@ class Node{
     this.upstream=new Array<Connection>();
     this.downstream=new Array<Connection>();
   }
-  set_output(output:dl.Scalar){this.output=output}
+  set_output(output:number){this.output=dl.scalar(output)}
   append_downstream_connection(conn:Connection){this.downstream.push(conn)}
   append_upstream_connection(conn:Connection){this.upstream.push(conn)}
   calc_output(){
-    // let output = dl.reduce(
-    // lambda a, b: a + b.upstream_node.output * b.weight,
-    // this.upstream, 0)
-    let output=dl.scalar(0.5309) as dl.Scalar;
+    let output=dl.scalar(0);
+    for(let i=0;i<this.upstream.length;i++){
+      let conn=this.upstream[i];
+      output=conn.upstream_node.output.mul(conn.weight).add(output);
+    }
     this.output = dl.sigmoid(output);
   }
   calc_hidden_layer_delta(){
-        // downstream_delta = reduce(
-        //     lambda ret, conn: ret + conn.downstream_node.delta * conn.weight,
-        //     this.downstream, 0.0)
-    // this.delta = this.output * (1 - this.output) * downstream_delta
+    let downstream_delta=dl.scalar(.0);
+    for(let i=0;i<this.downstream.length;i++){
+      let conn=this.downstream[i];
+      downstream_delta=conn.downstream_node.delta.mul(conn.weight).add(downstream_delta);
+    }
+    this.delta = this.output.mul(dl.scalar(1).sub(this.output)).mul(downstream_delta)
   }
   calc_output_layer_delta(label:number){
     this.delta=this.output.mul(dl.scalar(1).sub(this.output)).mul(dl.scalar(label).sub(this.output))
@@ -74,10 +77,11 @@ class Node{
     //     return node_str + '\n\tdownstream:' + downstream_str + '\n\tupstream:' + upstream_str 
 }
 class ConstNode{
-  protected layer_index:number;
-  protected node_index:number;
-  protected output=1;
-  protected downstream:Connection[];
+  layer_index:number;
+  node_index:number;
+  output=dl.scalar(1);
+  delta=dl.scalar(0);
+  downstream:Connection[];
   constructor(layer_index:number,node_index:number){
     this.layer_index = layer_index;
     this.node_index = node_index;
@@ -85,10 +89,12 @@ class ConstNode{
   }
   append_downstream_connection(conn:Connection){this.downstream.push(conn)}
   calc_hidden_layer_delta(){
-        // let downstream_delta = reduce(
-        //     lambda ret, conn: ret + conn.downstream_node.delta * conn.weight,
-        //     this.downstream, 0.0)
-        // this.delta = this.output * (1 - this.output) * downstream_delta
+    let downstream_delta=dl.scalar(.0);
+    for(let i=0;i<this.downstream.length;i++){
+      let conn=this.downstream[i];
+      downstream_delta=conn.downstream_node.delta.mul(conn.weight).add(downstream_delta);
+    }
+    this.delta = this.output.mul(dl.scalar(1).sub(this.output)).mul(downstream_delta)
   }
      // __str__(){
      //    let node_str = '%u-%u: output: 1' % (self.layer_index, self.node_index)
@@ -99,7 +105,7 @@ class ConstNode{
 class Connection{
   upstream_node:Node;
   downstream_node:Node;
-  protected weight:dl.Scalar;
+  weight:dl.Scalar;
   protected gradient=dl.scalar(.0) as dl.Scalar;
   constructor(upstream_node:Node, downstream_node:Node){
     this.upstream_node = upstream_node
@@ -134,7 +140,7 @@ class Layer{
     }
     this.nodes.push(new ConstNode(layer_index, node_count))
   }
-  set_output(data:any[]){
+  set_output(data:number[]){
     for(let i=0;i<data.length;i++){
       this.nodes[i].set_output(data[i])
     }
@@ -176,13 +182,14 @@ class Network{
   }
   train(labels:any[], data_set:any[], rate:number, epoch:number){
     for(let i=0;i<epoch;i++){
+      if(i==2)break;//FIXME
       for(let d=0;d<data_set.length;d++){
         this.train_one_sample(labels[d], data_set[d], rate)
         console.log('sample ${d} training finished')
       }
     }
   }
-  train_one_sample(label:any[], sample:any[], rate:number){
+  train_one_sample(label:number[], sample:number[], rate:number){
     this.predict(sample)
     this.calc_delta(label)
     this.update_weight(rate)
@@ -222,13 +229,17 @@ class Network{
     this.calc_delta(label)
     this.calc_gradient()
   }
-  predict(sample:any[]){
+  predict(sample:number[]){
     this.layers[0].set_output(sample)
     for(let i=1;i<this.layers.length;i++){
       this.layers[i].calc_output()
     }
-    return
-        // return map(lambda node: node.output, this.layers[-1].nodes[:-1])
+    let layer=this.layers[this.layers.length-1]
+    let ret=[];
+    for(let i=0;i<layer.nodes.length-1;i++){
+      ret.push(layer.nodes[i].output)
+    }
+    return ret;
   }
   dump(){
     for(let i=0,layer=this.layers[i];i<this.layers.length;i++){
