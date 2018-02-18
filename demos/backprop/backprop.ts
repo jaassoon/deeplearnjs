@@ -242,9 +242,39 @@ class Connections{
   add_connection(connection:Connection){this.conn.push(connection);}
   dump(){for(let i=0;i<this.conn.length;i++)this.conn[i].toString()}
 }
+class Normalizer{
+  private mask = [0x1, 0x2, 0x4, 0x8, 0x10, 0x20, 0x40, 0x80]
+  norm(number:number){
+    let ret=new Array<number>();
+    for(let i=0;i<this.mask.length;i++){
+      if(number & this.mask[i])ret.push(.9)
+      else ret.push(.1)
+    }
+    return ret;
+  }
+   // denorm( vec):
+   //     binary = map(lambda i: 1 if i > 0.5 else 0, vec)
+   //     for i in range(len(self.mask)):
+   //         binary[i] = binary[i] * self.mask[i]
+   //      return reduce(lambda x,y: x + y, binary)
+}
+function train_data_set(){
+  let normalizer=new Normalizer();
+  let data_set = [] as any[]
+  let labels = [] as any[]
+  let ret=[] as any[]
+  for(let i=0;i<256;i=i+8){
+    let n = normalizer.norm(Number(dl.util.randUniform(0, 256).toFixed(0)))
+    data_set.push(n)
+    labels.push(n)
+  }
+  ret.push(labels)
+  ret.push(data_set)
+  return ret;
+  }
 function train(network:Network){
-    // labels, data_set = train_data_set()
-    // network.train(labels, data_set, 0.3, 50)
+  let dataSet= train_data_set()
+  network.train(dataSet[0], dataSet[1], 0.3, 50)
 }
 const net=new Network([8,3,8]);
 console.log(net)
