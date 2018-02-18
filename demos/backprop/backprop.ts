@@ -40,26 +40,31 @@ class Node{
   node_index:number;
   downstream:Connection[];
   upstream:Connection[];
-  output=0;
-  delta=0;
+  output=dl.scalar(0) as dl.Scalar;
+  delta=dl.scalar(0) as dl.Scalar;
   constructor(layer_index:number, node_index:number){
     this.layer_index = layer_index;
     this.node_index = node_index;
   }
-  set_output(output:number){this.output=output}
+  set_output(output:dl.Scalar){this.output=output}
   append_downstream_connection(conn:Connection){this.downstream.push(conn)}
   append_upstream_connection(conn:Connection){this.upstream.push(conn)}
   calc_output(){
-    // let output = dl.reduce(lambda ret, conn: ret + conn.upstream_node.output * conn.weight, this.upstream, 0)
-    // this.output = dl.sigmoid(output);
+    // let output = dl.reduce(
+    // lambda a, b: a + b.upstream_node.output * b.weight,
+    // this.upstream, 0)
+    let output=dl.scalar(0.5309) as dl.Scalar;
+    this.output = dl.sigmoid(output);
   }
   calc_hidden_layer_delta(){
         // downstream_delta = reduce(
         //     lambda ret, conn: ret + conn.downstream_node.delta * conn.weight,
         //     this.downstream, 0.0)
-        // this.delta = this.output * (1 - this.output) * downstream_delta
+    // this.delta = this.output * (1 - this.output) * downstream_delta
   }
-  calc_output_layer_delta(label:number){this.delta = this.output * (1 - this.output) * (label - this.output)}
+  calc_output_layer_delta(label:number){
+    this.delta=this.output.mul(dl.scalar(1).sub(this.output)).mul(dl.scalar(label).sub(this.output))
+  }
     // __str__(){
     //     node_str = '%u-%u: output: %f delta: %f' % (self.layer_index, self.node_index, self.output, self.delta)
     //     downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
@@ -78,33 +83,33 @@ class ConstNode{
   }
   append_downstream_connection(conn:Connection){this.downstream.push(conn)}
   calc_hidden_layer_delta(){
-        // downstream_delta = reduce(
+        // let downstream_delta = reduce(
         //     lambda ret, conn: ret + conn.downstream_node.delta * conn.weight,
         //     this.downstream, 0.0)
         // this.delta = this.output * (1 - this.output) * downstream_delta
   }
-     /*__str__(self):
-        node_str = '%u-%u: output: 1' % (self.layer_index, self.node_index)
-        downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
-        return node_str + '\n\tdownstream:' + downstream_str*/
+     // __str__(){
+     //    let node_str = '%u-%u: output: 1' % (self.layer_index, self.node_index)
+     //    downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
+     //    return node_str + '\n\tdownstream:' + downstream_str
+     //    }
 }
 class Connection{
   upstream_node:Node;
   downstream_node:Node;
-  protected weight:number;
-  protected gradient:number;
+  protected weight:dl.Scalar;
+  protected gradient=dl.scalar(.0) as dl.Scalar;
   constructor(upstream_node:Node, downstream_node:Node){
     this.upstream_node = upstream_node
     this.downstream_node = downstream_node;
-    this.weight =dl.util.randUniform(-0.1, 0.1);
-    this.gradient = 0.0
+    this.weight =dl.scalar(dl.util.randUniform(-0.1, 0.1));
   }
   calc_gradient(){
-    this.gradient = this.downstream_node.delta * this.upstream_node.output
+    this.gradient = this.downstream_node.delta.mul(this.upstream_node.output)
   }
   update_weight(rate:number){
     this.calc_gradient()
-    this.weight += rate * this.gradient
+    this.weight = this.gradient.mul(dl.scalar(rate)).add(this.weight)
   }
   get_gradient(){return this.gradient}
   toString(){
