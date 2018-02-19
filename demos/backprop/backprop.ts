@@ -17,24 +17,6 @@
 
 import * as dl from 'deeplearn';
 
-export async function execute(event?: Event) {
-  let weights = dl.zeros([1]) as dl.Tensor1D;
-  let bias = dl.scalar(.0) as dl.Scalar;
-  let input_vecs=[[5], [3], [8], [1.4], [10.1]];
-  let label=[5500, 2300, 7600, 1800, 11400];
-  let rate=0.01;
-  for (let i = 0; i < 10; ++i) {
-    for (let j = 0; j < input_vecs.length; ++j) {
-      let input_vec=dl.tensor1d(input_vecs[j]);
-      let output=dl.sum(input_vec.mul(weights)).add(bias);
-      let delta=dl.scalar(label[j]).sub(output);
-      weights=weights.add(input_vec.mul(delta).mul(dl.scalar(rate)));
-      bias=bias.add(delta.mul(dl.scalar(rate)));
-    }
-  }
-  console.log('weights='+weights.dataSync())
-  console.log('bias='+bias.dataSync())
-}
 class Node{
   layer_index:number;
   node_index:number;
@@ -101,10 +83,10 @@ class ConstNode{
     this.delta = this.output.mul(dl.scalar(1).sub(this.output)).mul(downstream_delta)
   }
   toString(){
-    let node_str = '${this.layer_index}-${this.node_index}: output: 1';
+    let node_str = '%d-%d: output: 1';
     // downstream_str = reduce(lambda ret, conn: ret + '\n\t' + str(conn), self.downstream, '')
     // return node_str + '\n\tdownstream:' + downstream_str
-    console.log(node_str)
+    console.log(node_str,this.layer_index,this.node_index)
   }
 }
 class Connection{
@@ -186,11 +168,11 @@ class Network{
   }
   train(labels:any[], data_set:any[], rate:number, epoch:number){
     for(let i=0;i<epoch;i++){
-      if(i==1)break;//FIXME
+      if(i==2)break;//FIXME
       for(let d=0;d<data_set.length;d++){
-        if(d==3)break;//FIXME
+        // if(d==3)break;//FIXME
         this.train_one_sample(labels[d], data_set[d], rate)
-        console.log('sample %d training finished',d)
+        console.log('sample %d training finished on epoch %d',d,i)
       }
     }
   }
@@ -205,9 +187,10 @@ class Network{
     for(let i=0;i<label.length;i++){
       output_nodes[i].calc_output_layer_delta(label[i])
     }
-    for(let i=layersCnt-2,layer=this.layers[i];i<layersCnt;i++){
-      for(let j=0,node=layer.nodes[j];j<layer.nodes.length;j++){
-        node.calc_hidden_layer_delta()
+    for(let i=layersCnt-2;i>-1;i--){
+      let layer=this.layers[i]
+      for(let j=0;j<layer.nodes.length;j++){
+        layer.nodes[j].calc_hidden_layer_delta()
       }
     }
   }
