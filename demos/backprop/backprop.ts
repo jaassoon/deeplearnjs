@@ -127,9 +127,10 @@ class Layer{
     }
     this.nodes.push(new ConstNode(layer_index, node_count))
   }
-  set_output(data:number[]){
-    for(let i=0;i<data.length;i++){
-      this.nodes[i].set_output(data[i])
+  set_output(data:dl.Tensor1D){
+    let dataArr=data.dataSync()
+    for(let i=0;i<dataArr.length;i++){
+      this.nodes[i].set_output(dataArr[i])
     }
   }
   calc_output(){
@@ -142,7 +143,7 @@ class Layer{
   }
 }
 class Network{
-  protected connections:Connections;
+  connections:Connections;
   protected layers:Layer[];
   constructor(layers:any[]) {
     this.connections = new Connections();
@@ -171,12 +172,12 @@ class Network{
       if(i==2)break;//FIXME
       for(let d=0;d<data_set.length;d++){
         // if(d==3)break;//FIXME
-        this.train_one_sample(labels[d], data_set[d], rate)
+        this.train_one_sample(labels[d],dl.tensor1d(data_set[d]), rate)
         console.log('sample %d training finished on epoch %d',d,i)
       }
     }
   }
-  train_one_sample(label:number[], sample:number[], rate:number){
+  train_one_sample(label:number[], sample:dl.Tensor1D, rate:number){
     this.predict(sample)
     this.calc_delta(label)
     this.update_weight(rate)
@@ -216,12 +217,13 @@ class Network{
       }
     }
   }
-  get_gradient(label:any[], sample:any[]){
+  get_gradient(label:any[], sample:dl.Tensor1D){
     this.predict(sample)
     this.calc_delta(label)
     this.calc_gradient()
   }
-  predict(sample:number[]){
+  predict(sample:dl.Tensor1D){
+    //layer[0]= input data
     this.layers[0].set_output(sample)
     for(let i=1;i<this.layers.length;i++){
       this.layers[i].calc_output()
@@ -240,7 +242,7 @@ class Network{
   }
 }
 class Connections{
-  protected conn:Connection[];
+  conn:Connection[];
   constructor(){this.conn=new Array<Connection>()}
   add_connection(connection:Connection){this.conn.push(connection);}
   dump(){for(let i=0;i<this.conn.length;i++)this.conn[i].toString()}
@@ -255,11 +257,75 @@ class Normalizer{
     }
     return ret;
   }
-   // denorm( vec):
-   //     binary = map(lambda i: 1 if i > 0.5 else 0, vec)
-   //     for i in range(len(self.mask)):
-   //         binary[i] = binary[i] * self.mask[i]
-   //      return reduce(lambda x,y: x + y, binary)
+  denorm(vec:number[]){
+    let binary=[]
+    for(let i=0;i<vec.length;i++){
+      if(vec[i]>0.5)binary.push(1)
+      else binary.push(0)
+    }
+    for(let i=0;i<this.mask.length;i++){
+      binary[i] = binary[i] * this.mask[i]
+    }
+    let ret=.0
+    for(let i=0;i<binary.length;i++){
+      ret+=binary[i]
+    }
+    return ret
+  }
+}
+function correct_ratio(network:Network){
+  let normalizer = new Normalizer()
+  let correct = 0.0;
+  for(let i=0;i<256;i++){
+    if(normalizer.denorm(network.predict(dl.tensor1d(normalizer.norm(i))))==i)
+      correct+=1.0
+  }
+  console.log('correct_ratio: '+correct/256*100)
+}
+/*function mean_square_error(vec1, vec2){
+    return 0.5 * reduce(lambda a, b: a + b, 
+                        map(lambda v: (v[0] - v[1]) * (v[0] - v[1]),
+                            zip(vec1, vec2)
+                        )
+                 )
+}*/
+function network_error(sample_feature:number[], sample_label:number[]){
+  let tmp=[]
+  for(let i=0;i<sample_feature.length;i++){
+    tmp.push((sample_feature[i]-sample_label[i])*(sample_feature[i]-sample_label[i]))
+  }
+  let tmp2=.0
+  for(let i=0;i<tmp.length;i++){
+    tmp2+=tmp[i]
+  }
+  return 0.5*tmp2
+}
+function gradient_check(network:Network, sample_feature:number[], sample_label:number[]){
+    network.get_gradient(sample_feature, dl.tensor1d(sample_label))
+
+    for(let i=0;i<network.connections.conn.length;i++){
+      let conn=network.connections.conn[i];
+      let actual_gradient = conn.get_gradient()
+      let epsilon = 0.0001
+      conn.weight = conn.weight.add(dl.scalar(epsilon))
+      let error1 = network_error(network.predict(dl.tensor1d(sample_feature)), sample_label)
+      let error2 = network_error(network.predict(dl.tensor1d(sample_feature)), sample_label)
+      let expected_gradient = (error2 - error1) / (2 * epsilon)
+      console.log('expected_gradient: '+expected_gradient,
+        'actual_gradient: '+actual_gradient.dataSync()[0])
+    }
+}
+function test(network:Network, data:number){
+    let normalizer = new Normalizer()
+    let norm_data = normalizer.norm(data)
+    let predict_data = network.predict(dl.tensor1d([Number(norm_data)]))
+    console.log('predict_data: '+normalizer.denorm(predict_data))
+}
+function gradient_check_test(){
+  let net = new Network([2, 2, 2])
+  let sample_feature = [0.9, 0.1]
+  let sample_label = [0.9, 0.1]
+  gradient_check(net, sample_feature, sample_label)
 }
 function train_data_set(){
   let normalizer=new Normalizer();
@@ -283,3 +349,6 @@ const net=new Network([8,3,8]);
 console.log(net)
 train(net)
 net.dump()
+correct_ratio(net)
+test(net,2)
+gradient_check_test()
