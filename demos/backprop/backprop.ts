@@ -289,10 +289,11 @@ function correct_ratio(network:Network){
                         )
                  )
 }*/
-function network_error(sample_feature:number[], sample_label:number[]){
+function network_error(sample_feature:dl.Tensor[], sample_label:number[]){
   let tmp=[]
   for(let i=0;i<sample_feature.length;i++){
-    tmp.push((sample_feature[i]-sample_label[i])*(sample_feature[i]-sample_label[i]))
+    tmp.push((sample_feature[i].dataSync()[0]-sample_label[i])
+            *(sample_feature[i].dataSync()[0]-sample_label[i]))
   }
   let tmp2=.0
   for(let i=0;i<tmp.length;i++){
@@ -309,6 +310,7 @@ function gradient_check(network:Network, sample_feature:number[], sample_label:n
       let epsilon = 0.0001
       conn.weight = conn.weight.add(dl.scalar(epsilon))
       let error1 = network_error(network.predict(dl.tensor1d(sample_feature)), sample_label)
+      conn.weight = conn.weight.sub(dl.scalar(2*epsilon))
       let error2 = network_error(network.predict(dl.tensor1d(sample_feature)), sample_label)
       let expected_gradient = (error2 - error1) / (2 * epsilon)
       console.log('expected_gradient: '+expected_gradient,
