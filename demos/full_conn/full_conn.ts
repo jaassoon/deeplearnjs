@@ -39,7 +39,7 @@ class FullConnectedLayer{
     this.output=dl.sigmoid(this.W.matMul(input_array).add(this.b))
   }
   backward(delta_array:dl.Tensor2D){
-    this.delta=this.input.mul(dl.scalar(1).sub(this.input)).mul(this.W.transpose().matMul(delta_array))
+    this.delta=sigmoid_backward(this.input).mul(this.W.transpose().matMul(delta_array))
     this.W_grad=delta_array.mul(this.input.transpose())
     this.b_grad = delta_array
   }
@@ -48,8 +48,7 @@ class FullConnectedLayer{
     this.b =this.b.add(dl.scalar(learning_rate).mul(this.b_grad))
   }
   dump(){
-    console.log(this.W,this.b)
-    // print 'W: %s\nb:%s' % (this.W, this.b)
+    console.log(this.W.dataSync(),this.b.dataSync())
   }
 }
 class Network{
@@ -69,11 +68,15 @@ class Network{
     }
     return output
   }
-  train(labels:dl.Tensor2D[], data_set:dl.Tensor2D[], rate:number, epoch:number){
-    epoch=1;//FIXME
-    for(let i=0;i<epoch;i++){
+  train(labels:dl.Tensor2D[], data_set:dl.Tensor2D[], rate:number, mini_batch:number){
+    mini_batch=10;//FIXME
+    for(let i=0;i<mini_batch;i++){
       for(let d=0;d<data_set.length;d++){
         this.train_one_sample(labels[d],data_set[d],rate)
+        if(d==0||d==255){
+          console.log('mini_batch:%d,d:%d',i,d)
+          // this.dump()
+        }
       }
     }
   }
@@ -109,19 +112,35 @@ class Network{
     this.predict(sample_feature)
     this.calc_gradient(sample_label)
     let epsilon = 10e-4
-    /*for fc in this.layers:
-        for i in range(fc.W.shape[0]):
-            for j in range(fc.W.shape[1]):
-                fc.W[i,j] += epsilon
-                output = this.predict(sample_feature)
-                err1 = this.loss(sample_label, output)
-                fc.W[i,j] -= 2*epsilon
-                output = this.predict(sample_feature)
-                err2 = this.loss(sample_label, output)
-                expect_grad = (err1 - err2) / (2 * epsilon)
-                fc.W[i,j] += epsilon
-                print 'weights(%d,%d): expected - actural %.4e - %.4e' % (
-                    i, j, expect_grad, fc.W_grad[i,j])*/
+    for(let k=0;k<this.layers.length;k++){
+      let fc=this.layers[k];
+      for(let i=0;i<fc.W.shape[0];i++){
+        for(let j=0;j<fc.W.shape[1];j++){
+          let tmpValue=fc.W.get(fc.W.locToIndex([i,j])),
+          buffer=fc.W.buffer();
+          buffer.set(tmpValue+epsilon,i,j)
+          fc.W=buffer.toTensor()
+
+          let output = this.predict(sample_feature),
+          err1 = this.loss(sample_label, output)
+          tmpValue=fc.W.get(fc.W.locToIndex([i,j]))
+          buffer=fc.W.buffer();
+          buffer.set(tmpValue-2*epsilon,i,j)
+          fc.W=buffer.toTensor()
+
+          output = this.predict(sample_feature)
+          let err2 = this.loss(sample_label, output),
+          expect_grad = (err1 - err2) / (2 * epsilon)
+
+          tmpValue=fc.W.get(fc.W.locToIndex([i,j]))
+          buffer=fc.W.buffer();
+          buffer.set(tmpValue+epsilon,i,j)
+          fc.W=buffer.toTensor()
+          console.log('weights(%d,%d): expected - actural %.4e - %.4e',
+            i,j,expect_grad, fc.W_grad.get(fc.W_grad.locToIndex([i,j])))
+        }
+      }
+    }
   }
 }
 class Normalizer{
@@ -191,6 +210,7 @@ function test(){
   rate = 0.5,
   mini_batch = 20,
   epoch = 10;
+  epoch=1;//FIXME
   for(let i=0;i<epoch;i++){
     net.train(labels, data_set, rate, mini_batch)
     console.log('after epoch %d loss: %f',(i + 1)
@@ -200,13 +220,18 @@ function test(){
   }
   correct_ratio(net)
 }
+function sigmoid_backward(
+  output:dl.Tensor2D){
+  return output.mul(dl.scalar(1).sub(output))
+}
 function gradient_check(){
   // labels, data_set = transpose(train_data_set())
   let dataSet= train_data_set(),
-  labels=dataSet[0],
-  data_set = dataSet[1],
+  labels=dataSet[0] as dl.Tensor2D[],
+  data_set = dataSet[1] as dl.Tensor2D[],
   net = new Network([8, 3, 8])
   net.gradient_check(data_set[0], labels[0])
   return net
 }
-test()
+// test()
+gradient_check()
