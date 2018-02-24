@@ -51,7 +51,7 @@ class FullConnectedLayer{
     console.log(this.W.dataSync(),this.b.dataSync())
   }
 }
-class Network{
+export class Network{
   layers:FullConnectedLayer[]
   constructor(layers:number[]){
     this.layers = []
@@ -193,14 +193,6 @@ function correct_ratio(network:Network){
   }
   console.log('correct_ratio: %f%',correct/256*100)
 }
-/*function transpose(args){
-    return map(
-        lambda arg: map(
-            lambda line: np.array(line).reshape(len(line), 1)
-            , arg)
-        , args
-    )
-    }*/
 function test(){
   // labels, data_set = transpose(train_data_set())
   let dataSet= train_data_set(),
@@ -234,4 +226,4 @@ function gradient_check(){
   return net
 }
 // test()
-gradient_check()
+// gradient_check()
